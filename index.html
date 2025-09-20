@@ -176,9 +176,6 @@
         });
         wrap.appendChild(chip);
       });
-    });
-        wrap.appendChild(chip);
-      });
     }
 
     function addDay(name) {
@@ -392,8 +389,6 @@
         } catch(err) { alert('File non valido'); }
       };
       reader.readAsText(file);
-    };
-      reader.readAsText(file);
     }
 
     // --- Example loader ---
@@ -447,6 +442,14 @@
 
     document.getElementById('btnExample').addEventListener('click', loadExample);
     document.getElementById('btnReset').addEventListener('click', ()=>{ if(confirm('Sicuro?')) { state.people = []; state.days = []; renderPeopleChips(); renderDays(); document.getElementById('output').innerHTML=''; }});
+
+    // Enter-to-add for new person
+    document.getElementById('newPerson').addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('addPerson').click();
+      }
+    });
 
     // initial render
     renderPeopleChips();
