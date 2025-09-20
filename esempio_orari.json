@@ -1,0 +1,14 @@
+{
+  "people": ["Barbara", "Giulia", "Giacomo", "Luca", "Damiano", "Tatiana", "Mosè", "Paolo", "Siria"],
+  "days": [
+    {
+      "name": "Sabato",
+      "shifts": [
+        { "person": "Giacomo", "start": "07:45", "end": "09:45" },
+        { "person": "Paolo",   "start": "07:45", "end": "09:45" },
+        { "person": "Luca",    "start": "09:45", "end": "12:45" },
+        { "person": "Barbara", "start": "07:45", "end": "12:45" }
+      ]
+    }
+  ]
+}
