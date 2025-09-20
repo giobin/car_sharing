@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carpool Planner</title>
+  <!-- Tailwind via CDN (no build step) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #0b0f17; --card:#0f1729; --muted:#a3b1c6; }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: linear-gradient(180deg, #0e1525, #0a0f1a); color: #eef2ff; }
+    .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); }
+    .mono { font-variant-ligatures: none; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .badge { border:1px solid rgba(255,255,255,0.1); padding:2px 8px; border-radius:9999px; font-size:12px; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="max-w-6xl mx-auto px-4 py-8">
+    <div class="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
+      <h1 class="text-3xl md:text-4xl font-bold tracking-tight">🚗 Carpool Planner</h1>
+      <span class="badge text-slate-300">Partenza: <span class="mono">start − 45′</span> · Ritorno: <span class="mono">end</span></span>
+      <span class="badge text-slate-300">Luoghi: <span class="mono">i frati → lavoro → i frati</span></span>
+    </div>
+    <p class="text-slate-300 mt-2">Inserisci turni di uno o più giorni e genera un piano di spostamenti che minimizza il numero di auto e bilancia i conducenti.</p>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 pb-20">
+    <!-- Controls row -->
+    <section class="grid md:grid-cols-3 gap-6">
+      <!-- Settings card -->
+      <div class="glass rounded-2xl p-5">
+        <h2 class="font-semibold text-lg mb-3">Impostazioni</h2>
+        <label class="block text-sm text-slate-300 mb-1" for="capacity">Capienza per auto (incluso conducente)</label>
+        <input id="capacity" type="number" min="1" value="4" class="w-full rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2 mono"/>
+
+        <div class="mt-4 flex items-center gap-2">
+          <input id="strictTimes" type="checkbox" class="h-4 w-4" checked />
+          <label for="strictTimes" class="text-sm text-slate-300">Rispettare gli orari esatti dei gruppi (nessun anticipo/ritardo).</label>
+        </div>
+
+        <div class="mt-4 flex items-center gap-2">
+          <input id="linkUpDownDrivers" type="checkbox" class="h-4 w-4" />
+          <label for="linkUpDownDrivers" class="text-sm text-slate-300">Preferisci che chi guida all'andata guidi anche al ritorno (se possibile)</label>
+        </div>
+
+        <div class="mt-6 grid grid-cols-2 gap-2">
+          <button id="btnExample" class="rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2">Carica esempio</button>
+          <button id="btnReset" class="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2">Svuota tutto</button>
+        </div>
+      </div>
+
+      <!-- People card -->
+      <div class="glass rounded-2xl p-5 md:col-span-2">
+        <h2 class="font-semibold text-lg mb-4">Persone</h2>
+        <div class="flex flex-wrap gap-2" id="peopleChips"></div>
+        <div class="mt-4 flex gap-2">
+          <input id="newPerson" type="text" placeholder="Aggiungi persona (nome)" class="flex-1 rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2" />
+          <button id="addPerson" class="rounded-xl bg-indigo-500 hover:bg-indigo-600 px-3 py-2 font-semibold">Aggiungi</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scheduler -->
+    <section class="glass rounded-2xl p-5 mt-6">
+      <div class="flex flex-col md:flex-row md:items-end gap-3 md:gap-4">
+        <div class="flex-1">
+          <label class="block text-sm text-slate-300 mb-1" for="dayName">Giorno</label>
+          <input id="dayName" type="text" placeholder="Es. Sabato, 21/09, Lunedì" class="w-full rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2" />
+        </div>
+        <button id="addDay" class="rounded-xl bg-emerald-500 hover:bg-emerald-600 px-4 py-2 font-semibold">Aggiungi giorno</button>
+      </div>
+
+      <div id="daysContainer" class="mt-6 grid gap-6"></div>
+    </section>
+
+    <!-- Actions -->
+    <div class="mt-6 flex flex-wrap gap-3">
+      <button id="btnGenerate" class="rounded-xl bg-indigo-500 hover:bg-indigo-600 px-4 py-2 font-semibold">Genera piano</button>
+      <button id="btnExport" class="rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2">Esporta JSON</button>
+      <input id="fileImport" type="file" accept="application/json" class="hidden" />
+      <button id="btnImport" class="rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2">Importa JSON</button>
+    </div>
+
+    <!-- Output -->
+    <section id="output" class="mt-6 grid gap-4"></section>
+  </main>
+
+  <template id="tmplDay">
+    <div class="rounded-2xl border border-white/10 bg-slate-900/30">
+      <div class="flex items-center justify-between p-4 border-b border-white/10">
+        <div class="flex items-center gap-2">
+          <h3 class="font-semibold text-lg day-title"></h3>
+          <span class="badge text-slate-300">Turni</span>
+        </div>
+        <div class="flex gap-2">
+          <button class="btnQuickAdd rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5 text-sm">+ Aggiungi turno</button>
+          <button class="btnRemoveDay rounded-lg bg-white/5 hover:bg-white/10 px-3 py-1.5 text-sm">Rimuovi giorno</button>
+        </div>
+      </div>
+      <div class="p-4 grid gap-3 shifts"></div>
+    </div>
+  </template>
+
+  <template id="tmplShift">
+    <div class="grid md:grid-cols-12 gap-2 items-end">
+      <div class="md:col-span-4">
+        <label class="block text-xs text-slate-300 mb-1">Persona</label>
+        <select class="person w-full rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2"></select>
+      </div>
+      <div class="md:col-span-3">
+        <label class="block text-xs text-slate-300 mb-1">Inizio</label>
+        <input type="time" class="start w-full rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2" step="60">
+      </div>
+      <div class="md:col-span-3">
+        <label class="block text-xs text-slate-300 mb-1">Fine</label>
+        <input type="time" class="end w-full rounded-lg bg-slate-900/60 border border-white/10 px-3 py-2" step="60">
+      </div>
+      <div class="md:col-span-2 flex gap-2">
+        <button class="btnClone rounded-lg bg-white/10 hover:bg-white/20 px-3 py-2">Duplica</button>
+        <button class="btnDelete rounded-lg bg-white/5 hover:bg-white/10 px-3 py-2">Elimina</button>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    // --- State ---
+    const state = {
+      people: ["Barbara","Giulia","Giacomo","Luca","Damiano","Tatiana","Mosè","Paolo","Siria"],
+      days: [] // { name, shifts: [{person, start, end}] }
+    };
+
+    // --- Helpers ---
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+    function minutes(t) { // HH:MM -> total minutes
+      const [h,m] = t.split(":").map(Number);
+      return h*60 + m;
+    }
+    function pad(n) { return n.toString().padStart(2,'0'); }
+    function timeStr(mins) { const h = Math.floor(mins/60), m = mins%60; return `${pad(h)}:${pad(m)}`; }
+    function departFromStart(start) { return minutes(start) - 45; }
+
+    function renderPeopleChips() {
+      const wrap = document.getElementById('peopleChips');
+      wrap.innerHTML = '';
+      state.people.forEach(name => {
+        const chip = document.createElement('span');
+        chip.className = 'badge bg-white/5';
+        chip.textContent = name;
+        chip.title = 'Clicca per rimuovere';
+        chip.addEventListener('click', () => {
+          if (!confirm(`Rimuovere ${name}?`)) return;
+          state.people = state.people.filter(p => p!==name);
+          // Also remove shifts for this person
+          state.days.forEach(d => d.shifts = d.shifts.filter(s => s.person!==name));
+          renderPeopleChips();
+          renderDays();
+        });
+        wrap.appendChild(chip);
+      });
+    }
+
+    function addDay(name) {
+      if (!name) return alert('Inserisci un nome giorno');
+      state.days.push({ name, shifts: [] });
+      renderDays();
+    }
+
+    function renderDays() {
+      const cont = document.getElementById('daysContainer');
+      cont.innerHTML = '';
+      state.days.forEach((day, idx) => {
+        const node = document.getElementById('tmplDay').content.cloneNode(true);
+        node.querySelector('.day-title').textContent = day.name;
+        const shiftsWrap = node.querySelector('.shifts');
+        const addBtn = node.querySelector('.btnQuickAdd');
+        const rmBtn = node.querySelector('.btnRemoveDay');
+        addBtn.addEventListener('click', () => { day.shifts.push({person: state.people[0] || '', start:'07:45', end:'12:45'}); renderDays(); });
+        rmBtn.addEventListener('click', () => { if(confirm('Rimuovere il giorno?')) { state.days.splice(idx,1); renderDays(); }});
+
+        day.shifts.forEach((s, sidx) => {
+          const row = document.getElementById('tmplShift').content.cloneNode(true);
+          const sel = row.querySelector('.person');
+          sel.innerHTML = state.people.map(p=>`<option ${p===s.person?'selected':''}>${p}</option>`).join('');
+          sel.addEventListener('change', e => { s.person = e.target.value; });
+          const start = row.querySelector('.start');
+          start.value = s.start; start.addEventListener('input', e => { s.start = e.target.value; });
+          const end = row.querySelector('.end');
+          end.value = s.end; end.addEventListener('input', e => { s.end = e.target.value; });
+          row.querySelector('.btnDelete').addEventListener('click', ()=>{ day.shifts.splice(sidx,1); renderDays(); });
+          row.querySelector('.btnClone').addEventListener('click', ()=>{ day.shifts.splice(sidx+1,0,JSON.parse(JSON.stringify(s))); renderDays(); });
+          shiftsWrap.appendChild(row);
+        });
+
+        cont.appendChild(node);
+      });
+    }
+
+    function groupBy(arr, keyFn) {
+      const m = new Map();
+      for (const x of arr) {
+        const k = keyFn(x);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(x);
+      }
+      return m;
+    }
+
+    function planTrips(day, opts) {
+      const { capacity, strict, linkUpDown } = opts;
+      const driversCount = {}; // person -> times driving (for this day planning)
+      state.people.forEach(p => driversCount[p] = 0);
+
+      // Build rides UP (depart from "i frati" at start-45)
+      const upSlots = groupBy(day.shifts, s => departFromStart(s.start));
+      const upPlans = [];
+      for (const [slotMin, people] of Array.from(upSlots.entries()).sort((a,b)=>a[0]-b[0])) {
+        const time = Number(slotMin);
+        const n = people.length;
+        const cars = Math.ceil(n / capacity);
+        // Choose drivers with the lowest current count among this slot's people
+        const sortedForDriver = [...people].sort((a,b)=> driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person));
+        const drivers = sortedForDriver.slice(0, cars).map(s=>s.person);
+        drivers.forEach(d => driversCount[d]++);
+        // Initialize cars
+        const carLoads = drivers.map(d => ({ time, from:'i frati', to:'lavoro', driver:d, passengers:[d], kind:'up' }));
+        // Fill passengers round-robin (excluding drivers already seated)
+        const queue = people.filter(s => !drivers.includes(s.person)).map(s=>s.person);
+        let idx = 0;
+        while (queue.length) {
+          const p = queue.shift();
+          const target = carLoads[idx % carLoads.length];
+          if (target.passengers.length < capacity) target.passengers.push(p);
+          else { idx++; continue; }
+          idx++;
+        }
+        upPlans.push(...carLoads);
+      }
+
+      // Build rides DOWN (depart from "lavoro" at end)
+      const downSlots = groupBy(day.shifts, s => minutes(s.end));
+      const downPlans = [];
+      for (const [slotMin, people] of Array.from(downSlots.entries()).sort((a,b)=>a[0]-b[0])) {
+        const time = Number(slotMin);
+        const n = people.length;
+        const cars = Math.ceil(n / capacity);
+
+        let candidates = [...people];
+        if (linkUpDown) {
+          // Prefer persons who already drove UP in the same slot (or same day) but keep balancing
+          const droveUp = new Set(upPlans.filter(u=>u.time===time-45).map(u=>u.driver));
+          candidates.sort((a,b)=> {
+            const aPref = droveUp.has(a.person) ? -1 : 0;
+            const bPref = droveUp.has(b.person) ? -1 : 0;
+            if (aPref !== bPref) return aPref - bPref;
+            return driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person);
+          });
+        } else {
+          candidates.sort((a,b)=> driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person));
+        }
+        const drivers = candidates.slice(0, cars).map(s=>s.person);
+        drivers.forEach(d => driversCount[d]++);
+        const carLoads = drivers.map(d => ({ time, from:'lavoro', to:'i frati', driver:d, passengers:[d], kind:'down' }));
+        const queue = people.filter(s => !drivers.includes(s.person)).map(s=>s.person);
+        let idx = 0;
+        while (queue.length) {
+          const p = queue.shift();
+          const target = carLoads[idx % carLoads.length];
+          if (target.passengers.length < capacity) target.passengers.push(p);
+          else { idx++; continue; }
+          idx++;
+        }
+        downPlans.push(...carLoads);
+      }
+
+      // Sort all trips by time then kind(up before down at same minute)
+      const all = [...upPlans, ...downPlans].sort((a,b)=> a.time - b.time || (a.kind==='up'? -1: 1));
+      return all;
+    }
+
+    function renderPlan(plansByDay) {
+      const out = document.getElementById('output');
+      out.innerHTML = '';
+      for (const { dayName, trips } of plansByDay) {
+        const card = document.createElement('div');
+        card.className = 'glass rounded-2xl p-5';
+        const h = document.createElement('h3');
+        h.className = 'font-semibold text-xl mb-3';
+        h.textContent = dayName;
+        card.appendChild(h);
+
+        const list = document.createElement('div');
+        list.className = 'grid gap-2';
+        trips.forEach((t,i) => {
+          const arrow = t.kind==='up' ? '⬆️' : '⬇️';
+          const carEmoji = '🚗';
+          const time = timeStr(t.time);
+          const who = t.passengers.join(', ');
+          const line = document.createElement('div');
+          line.className = 'flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2';
+          line.innerHTML = `
+            <span class="mono text-sm w-16">h ${time}</span>
+            <span>${carEmoji}</span>
+            <span class="font-semibold">${t.driver}</span>
+            <span class="opacity-70">${arrow}</span>
+            <span class="truncate">${who}</span>
+            <span class="ml-auto text-xs text-slate-300">${t.from} → ${t.to}</span>
+          `;
+          list.appendChild(line);
+        });
+        card.appendChild(list);
+        out.appendChild(card);
+      }
+    }
+
+    function generate() {
+      if (!state.days.length) return alert('Aggiungi almeno un giorno con dei turni.');
+      const capacity = Math.max(1, Number(document.getElementById('capacity').value || 4));
+      const strict = document.getElementById('strictTimes').checked;
+      const linkUpDown = document.getElementById('linkUpDownDrivers').checked;
+
+      const plansByDay = state.days.map(day => {
+        // Input validation: ensure each shift has existing person and times
+        day.shifts = day.shifts.filter(s => s.person && s.start && s.end);
+        // If strict times off, we could merge nearby slots (±15') — left as simple strict v1
+        const trips = planTrips(day, { capacity, strict, linkUpDown });
+        return { dayName: day.name, trips };
+      });
+      renderPlan(plansByDay);
+    }
+
+    function exportJSON() {
+      const data = JSON.stringify(state, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'carpool-data.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importJSON(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (Array.isArray(data.people)) state.people = data.people;
+          if (Array.isArray(data.days)) state.days = data.days;
+          renderPeopleChips();
+          renderDays();
+        } catch(err) { alert('File non valido'); }
+      };
+      reader.readAsText(file);
+    }
+
+    // --- Example loader ---
+    function loadExample() {
+      state.people = ["Barbara","Giulia","Giacomo","Luca","Damiano","Tatiana","Mosè","Paolo","Siria"]; 
+      state.days = [
+        { name: 'Sabato', shifts: [
+          { person:'Giacomo', start:'07:45', end:'09:45' },
+          { person:'Paolo',   start:'07:45', end:'09:45' },
+          { person:'Luca',    start:'09:45', end:'12:45' },
+          { person:'Barbara', start:'07:45', end:'12:45' },
+        ]}
+      ];
+      renderPeopleChips();
+      renderDays();
+    }
+
+    // --- Events ---
+    document.getElementById('addPerson').addEventListener('click', ()=>{
+      const name = document.getElementById('newPerson').value.trim();
+      if (!name) return;
+      if (state.people.includes(name)) return alert('Esiste già');
+      state.people.push(name);
+      document.getElementById('newPerson').value = '';
+      renderPeopleChips();
+      renderDays();
+    });
+
+    document.getElementById('addDay').addEventListener('click', ()=>{
+      addDay(document.getElementById('dayName').value.trim());
+      document.getElementById('dayName').value = '';
+    });
+
+    document.getElementById('btnGenerate').addEventListener('click', generate);
+    document.getElementById('btnExport').addEventListener('click', exportJSON);
+    document.getElementById('btnImport').addEventListener('click', ()=> document.getElementById('fileImport').click());
+    document.getElementById('fileImport').addEventListener('change', (e)=>{
+      if (e.target.files && e.target.files[0]) importJSON(e.target.files[0]);
+      e.target.value = '';
+    });
+
+    document.getElementById('btnExample').addEventListener('click', loadExample);
+    document.getElementById('btnReset').addEventListener('click', ()=>{ if(confirm('Sicuro?')) { state.people = []; state.days = []; renderPeopleChips(); renderDays(); document.getElementById('output').innerHTML=''; }});
+
+    // initial render
+    renderPeopleChips();
+    renderDays();
+  </script>
+</body>
+</html>
