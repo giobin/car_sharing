@@ -128,7 +128,17 @@
   <script>
     // --- State ---
     const state = {
-      people: ["Barbara","Giulia","Giacomo","Luca","Damiano","Tatiana","Mosè","Paolo","Siria"],
+      people: [
+        { name: "Barbara", hasCar: true },
+        { name: "Giulia", hasCar: true },
+        { name: "Giacomo", hasCar: true },
+        { name: "Luca", hasCar: true },
+        { name: "Damiano", hasCar: true },
+        { name: "Tatiana", hasCar: true },
+        { name: "Mosè", hasCar: true },
+        { name: "Paolo", hasCar: true },
+        { name: "Siria", hasCar: true }
+      ],
       days: [] // { name, shifts: [{person, start, end}] }
     };
 
@@ -147,19 +157,26 @@
     function renderPeopleChips() {
       const wrap = document.getElementById('peopleChips');
       wrap.innerHTML = '';
-      state.people.forEach(name => {
+      state.people.forEach(p => {
         const chip = document.createElement('span');
-        chip.className = 'badge bg-white/5';
-        chip.textContent = name;
-        chip.title = 'Clicca per rimuovere';
+        chip.className = 'badge bg-white/5 flex items-center gap-2 cursor-pointer';
+        const car = p.hasCar ? '🚗' : '🚫';
+        chip.innerHTML = `<span>${car}</span><span>${p.name}</span>`;
+        chip.title = 'Click: ha auto sì/no · Tasto destro: rimuovi';
         chip.addEventListener('click', () => {
-          if (!confirm(`Rimuovere ${name}?`)) return;
-          state.people = state.people.filter(p => p!==name);
-          // Also remove shifts for this person
-          state.days.forEach(d => d.shifts = d.shifts.filter(s => s.person!==name));
+          p.hasCar = !p.hasCar; renderPeopleChips(); renderDays();
+        });
+        chip.addEventListener('contextmenu', (e)=>{
+          e.preventDefault();
+          if (!confirm(`Rimuovere ${p.name}?`)) return;
+          state.people = state.people.filter(q => q.name!==p.name);
+          state.days.forEach(d => d.shifts = d.shifts.filter(s => s.person!==p.name));
           renderPeopleChips();
           renderDays();
         });
+        wrap.appendChild(chip);
+      });
+    });
         wrap.appendChild(chip);
       });
     }
@@ -179,13 +196,13 @@
         const shiftsWrap = node.querySelector('.shifts');
         const addBtn = node.querySelector('.btnQuickAdd');
         const rmBtn = node.querySelector('.btnRemoveDay');
-        addBtn.addEventListener('click', () => { day.shifts.push({person: state.people[0] || '', start:'07:45', end:'12:45'}); renderDays(); });
+        addBtn.addEventListener('click', () => { day.shifts.push({person: (state.people[0]?.name || ''), start:'07:45', end:'12:45'}); renderDays(); });
         rmBtn.addEventListener('click', () => { if(confirm('Rimuovere il giorno?')) { state.days.splice(idx,1); renderDays(); }});
 
         day.shifts.forEach((s, sidx) => {
           const row = document.getElementById('tmplShift').content.cloneNode(true);
           const sel = row.querySelector('.person');
-          sel.innerHTML = state.people.map(p=>`<option ${p===s.person?'selected':''}>${p}</option>`).join('');
+          sel.innerHTML = state.people.map(p=>`<option ${p.name===s.person?'selected':''}>${p.name}</option>`).join('');
           sel.addEventListener('change', e => { s.person = e.target.value; });
           const start = row.querySelector('.start');
           start.value = s.start; start.addEventListener('input', e => { s.start = e.target.value; });
@@ -212,23 +229,32 @@
 
     function planTrips(day, opts) {
       const { capacity, strict, linkUpDown } = opts;
+      const byName = Object.fromEntries(state.people.map(p=>[p.name,p]));
       const driversCount = {}; // person -> times driving (for this day planning)
-      state.people.forEach(p => driversCount[p] = 0);
+      state.people.forEach(p => driversCount[p.name] = 0);
+
+      const unassignedWarnings = [];
 
       // Build rides UP (depart from "i frati" at start-45)
       const upSlots = groupBy(day.shifts, s => departFromStart(s.start));
       const upPlans = [];
+      const upDriversSet = new Set(); // who actually drove up
       for (const [slotMin, people] of Array.from(upSlots.entries()).sort((a,b)=>a[0]-b[0])) {
         const time = Number(slotMin);
         const n = people.length;
-        const cars = Math.ceil(n / capacity);
-        // Choose drivers with the lowest current count among this slot's people
-        const sortedForDriver = [...people].sort((a,b)=> driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person));
-        const drivers = sortedForDriver.slice(0, cars).map(s=>s.person);
-        drivers.forEach(d => driversCount[d]++);
-        // Initialize cars
+        const eligible = people.filter(s => byName[s.person]?.hasCar);
+        const carsNeeded = Math.ceil(n / capacity);
+        const carsAvailable = Math.min(carsNeeded, eligible.length);
+
+        if (carsAvailable === 0) {
+          unassignedWarnings.push({ time, kind:'up', message:`Nessuna auto disponibile all'andata per ${n} persone` });
+          continue;
+        }
+        const sortedForDriver = [...eligible].sort((a,b)=> driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person));
+        const drivers = sortedForDriver.slice(0, carsAvailable).map(s=>s.person);
+        drivers.forEach(d => { driversCount[d]++; upDriversSet.add(d); });
+
         const carLoads = drivers.map(d => ({ time, from:'i frati', to:'lavoro', driver:d, passengers:[d], kind:'up' }));
-        // Fill passengers round-robin (excluding drivers already seated)
         const queue = people.filter(s => !drivers.includes(s.person)).map(s=>s.person);
         let idx = 0;
         while (queue.length) {
@@ -241,44 +267,50 @@
         upPlans.push(...carLoads);
       }
 
-      // Build rides DOWN (depart from "lavoro" at end)
+      // Build rides DOWN (only cars of those who actually started)
       const downSlots = groupBy(day.shifts, s => minutes(s.end));
       const downPlans = [];
+      const endTimeByPerson = {};
+      for (const s of day.shifts) { if (endTimeByPerson[s.person] == null) endTimeByPerson[s.person] = minutes(s.end); }
+
       for (const [slotMin, people] of Array.from(downSlots.entries()).sort((a,b)=>a[0]-b[0])) {
         const time = Number(slotMin);
         const n = people.length;
-        const cars = Math.ceil(n / capacity);
+        const availableDrivers = state.people
+          .map(p=>p.name)
+          .filter(name => upDriversSet.has(name) && endTimeByPerson[name] === time);
 
-        let candidates = [...people];
-        if (linkUpDown) {
-          // Prefer persons who already drove UP in the same slot (or same day) but keep balancing
-          const droveUp = new Set(upPlans.filter(u=>u.time===time-45).map(u=>u.driver));
-          candidates.sort((a,b)=> {
-            const aPref = droveUp.has(a.person) ? -1 : 0;
-            const bPref = droveUp.has(b.person) ? -1 : 0;
-            if (aPref !== bPref) return aPref - bPref;
-            return driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person);
-          });
-        } else {
-          candidates.sort((a,b)=> driversCount[a.person] - driversCount[b.person] || a.person.localeCompare(b.person));
+        const carsAvailable = availableDrivers.length;
+        if (carsAvailable === 0) {
+          unassignedWarnings.push({ time, kind:'down', message:`Nessuna auto disponibile al ritorno per ${n} persone` });
+          continue;
         }
-        const drivers = candidates.slice(0, cars).map(s=>s.person);
+        const sortedDrivers = [...availableDrivers].sort((a,b)=> driversCount[a] - driversCount[b] || a.localeCompare(b));
+        const maxCarsWeUse = Math.min(Math.ceil(n / capacity), carsAvailable);
+        const drivers = sortedDrivers.slice(0, maxCarsWeUse);
         drivers.forEach(d => driversCount[d]++);
+
         const carLoads = drivers.map(d => ({ time, from:'lavoro', to:'i frati', driver:d, passengers:[d], kind:'down' }));
         const queue = people.filter(s => !drivers.includes(s.person)).map(s=>s.person);
         let idx = 0;
         while (queue.length) {
           const p = queue.shift();
           const target = carLoads[idx % carLoads.length];
-          if (target.passengers.length < capacity) target.passengers.push(p);
+          if (target && target.passengers.length < capacity) target.passengers.push(p);
           else { idx++; continue; }
           idx++;
+        }
+        const assigned = carLoads.reduce((acc,c)=> acc + (c?.passengers?.length || 0), 0);
+        if (assigned < n) {
+          unassignedWarnings.push({ time, kind:'down', message:`Posti insufficienti al ritorno: ${n-assigned} persone senza auto` });
         }
         downPlans.push(...carLoads);
       }
 
-      // Sort all trips by time then kind(up before down at same minute)
       const all = [...upPlans, ...downPlans].sort((a,b)=> a.time - b.time || (a.kind==='up'? -1: 1));
+      if (unassignedWarnings.length) {
+        all.push(...unassignedWarnings.map(w=>({ time:w.time, from:'', to:'', driver:'⚠️', passengers:[w.message], kind:w.kind })));
+      }
       return all;
     }
 
@@ -347,18 +379,36 @@
       reader.onload = () => {
         try {
           const data = JSON.parse(reader.result);
-          if (Array.isArray(data.people)) state.people = data.people;
+          if (Array.isArray(data.people)) {
+            if (typeof data.people[0] === 'string') {
+              state.people = data.people.map(n=>({ name:n, hasCar:true }));
+            } else {
+              state.people = data.people.map(p=>({ name:p.name, hasCar: p.hasCar !== false }));
+            }
+          }
           if (Array.isArray(data.days)) state.days = data.days;
           renderPeopleChips();
           renderDays();
         } catch(err) { alert('File non valido'); }
       };
       reader.readAsText(file);
+    };
+      reader.readAsText(file);
     }
 
     // --- Example loader ---
     function loadExample() {
-      state.people = ["Barbara","Giulia","Giacomo","Luca","Damiano","Tatiana","Mosè","Paolo","Siria"]; 
+      state.people = [
+        { name: "Barbara", hasCar: true },
+        { name: "Giulia", hasCar: true },
+        { name: "Giacomo", hasCar: true },
+        { name: "Luca", hasCar: true },
+        { name: "Damiano", hasCar: true },
+        { name: "Tatiana", hasCar: true },
+        { name: "Mosè", hasCar: true },
+        { name: "Paolo", hasCar: true },
+        { name: "Siria", hasCar: true }
+      ]; 
       state.days = [
         { name: 'Sabato', shifts: [
           { person:'Giacomo', start:'07:45', end:'09:45' },
@@ -375,8 +425,8 @@
     document.getElementById('addPerson').addEventListener('click', ()=>{
       const name = document.getElementById('newPerson').value.trim();
       if (!name) return;
-      if (state.people.includes(name)) return alert('Esiste già');
-      state.people.push(name);
+      if (state.people.some(p=>p.name===name)) return alert('Esiste già');
+      state.people.push({ name, hasCar: true });
       document.getElementById('newPerson').value = '';
       renderPeopleChips();
       renderDays();
