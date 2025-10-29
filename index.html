@@ -413,8 +413,7 @@
       eveningCarsByEnd.set(end, cars);
     }
 
-    // --- RENDER: manteniamo le card per coppie (start,end),
-    // ma mostriamo l’andata con le auto del gruppo "start".
+    // --- RENDER
     const card = document.createElement('div');
     card.className = 'glass rounded-2xl p-5';
     const title = document.createElement('h3');
@@ -431,7 +430,7 @@
       sec.className = 'rounded-xl border border-white/10 p-4 mb-4';
       const h = document.createElement('div');
       h.className = 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3';
-      h.innerHTML = `<div class="font-semibold">Turno <span class="mono">${start}</span> → <span class="mono">${end}</span> <span class="badge ml-2">Partenza ${timeStr(departFromStart(start))}</span></div>`;
+      h.innerHTML = `<div class="font-semibold">Turno <span class="mono">${start}</span> → <span class="mono">${end}</span></div>`;
       sec.appendChild(h);
 
       const list = document.createElement('div');
@@ -447,7 +446,6 @@
         const cardCar = document.createElement('div');
         cardCar.className = 'bg-white/5 rounded-xl p-3 border border-white/10';
         const pax = subPassengers.length ? subPassengers.join(', ') : '—';
-        // NOTE UI: cambiamo la riga del ritorno
         cardCar.innerHTML = `
           <div class="text-sm text-slate-300">Auto ${i+1} (ANDATA)</div>
           <div class="mt-1"><span class="font-semibold">Conducente:</span> <span class="wrap-list">${car.driver}</span></div>
@@ -457,7 +455,6 @@
         list.appendChild(cardCar);
       });
 
-      // (opzionale) piccola riga riassuntiva del ritorno
       const ret = document.createElement('div');
       ret.className = 'sm:col-span-2 text-xs text-slate-400 mt-1';
       const eveningDrivers = (eveningCarsByEnd.get(end)||[]).map(c=>c.driver);
@@ -475,7 +472,95 @@
     out.innerHTML = '<div class="text-slate-300">Nessun giorno inserito.</div>';
   }
 }
+|${s.end}`);
 
+        // UI card per il giorno
+        const card = document.createElement('div');
+        card.className = 'glass rounded-2xl p-5';
+        const title = document.createElement('h3');
+        title.className = 'font-semibold text-xl mb-3';
+        title.textContent = day.name || day.date;
+        card.appendChild(title);
+
+        for (const [key, shifts] of groups.entries()) {
+          const [start, end] = key.split('|');
+          const members = shifts.map(s => s.person).filter(Boolean);
+          const eligibleDrivers = members.filter(n => hasCar[n]);
+
+          // Greedy: scegli il minimo numero di auto con vincolo: i driver scelti saranno gli stessi all'andata e al ritorno
+          const remaining = new Set(members);
+          const cars = [];
+
+          function pickDriver() {
+            if (eligibleDrivers.length===0) return null;
+            // driver con minor carico tra i rimanenti
+            const candidates = eligibleDrivers.filter(n => remaining.has(n));
+            if (candidates.length===0) return null;
+            candidates.sort((a,b)=> driveCount[a]-driveCount[b] || a.localeCompare(b));
+            return candidates[0];
+          }
+
+          // priorità ai passeggeri senza auto per riempire i posti
+          const noCar = members.filter(n => !hasCar[n]);
+          const withCar = members.filter(n => hasCar[n]);
+
+          while (remaining.size>0) {
+            const d = pickDriver();
+            if (!d) {
+              alert(`Giorno ${day.name}: per il gruppo ${start}-${end} servono più auto ma non ci sono abbastanza conducenti con macchina.`);
+              break;
+            }
+            const car = { driver: d, passengers: [] };
+            cars.push(car);
+            remaining.delete(d);
+
+            // riempi i posti: prima chi non ha auto, poi il resto
+            const seats = capacity - 1;
+            const fillOrder = [...noCar, ...withCar].filter(n => remaining.has(n));
+            for (const n of fillOrder) {
+              if (car.passengers.length >= seats) break;
+              car.passengers.push(n);
+              remaining.delete(n);
+            }
+
+            driveCount[d] += 1; // conta solo una volta (vale per andata e ritorno)
+          }
+
+          // Render sezione gruppo
+          const sec = document.createElement('div');
+          sec.className = 'rounded-xl border border-white/10 p-4 mb-4';
+          const h = document.createElement('div');
+          h.className = 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3';
+          h.innerHTML = `<div class="font-semibold">Turno <span class="mono">${start}</span> → <span class="mono">${end}</span> <span class="badge ml-2">Partenza ${timeStr(departFromStart(start))}</span></div>`;
+          sec.appendChild(h);
+
+          const list = document.createElement('div');
+          list.className = 'grid sm:grid-cols-2 gap-3';
+
+          cars.forEach((c, i) => {
+            const cardCar = document.createElement('div');
+            cardCar.className = 'bg-white/5 rounded-xl p-3 border border-white/10';
+            const pax = c.passengers.length ? c.passengers.join(', ') : '—';
+            cardCar.innerHTML = `
+              <div class="text-sm text-slate-300">Auto ${i+1}</div>
+              <div class="mt-1"><span class="font-semibold">Conducente:</span> <span class="wrap-list">${c.driver}</span></div>
+              <div class="mt-1"><span class="font-semibold">Passeggeri:</span> <span class="wrap-list">${pax}</span></div>
+              <div class="mt-2 text-xs text-slate-400">Ritorno: stesso conducente (${c.driver}).</div>
+            `;
+            list.appendChild(cardCar);
+          });
+
+          sec.appendChild(list);
+          card.appendChild(sec);
+        }
+
+        out.appendChild(card);
+      }
+
+      if (!state.days.length) {
+        out.innerHTML = '<div class="text-slate-300">Nessun giorno inserito.</div>';
+      }
+    }
 
     // --- Events ---
     document.getElementById('addPerson').addEventListener('click', ()=>{
