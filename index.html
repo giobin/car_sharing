@@ -2,177 +2,149 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Car Sharing Planner (Simple)</title>
+  <title>Car Sharing Planner - Minimal</title>
   <style>
-    body { font-family: sans-serif; margin: 20px; background: #f7f7f7; }
-    h2 { margin-top: 1em; }
-    .box { background: white; padding: 10px; margin: 10px 0; border-radius: 5px; }
-    label { display: block; margin: 5px 0; }
-    input, select { margin-left: 5px; }
-    button { margin-top: 5px; }
-    pre { background: #eee; padding: 10px; border-radius: 5px; white-space: pre-wrap; }
+    body { font-family: system-ui, sans-serif; margin: 20px; background:#fafafa; }
+    h1 { margin-bottom: 8px; }
+    h2 { margin: 14px 0 6px; }
+    .box { background: #fff; border: 1px solid #ddd; padding: 12px; border-radius: 6px; margin: 12px 0; }
+    label { display:block; margin:6px 0; }
+    input, select { padding:4px; }
+    button { margin-top:6px; padding:6px 10px; }
+    ul { margin:6px 0; }
+    pre { background:#f0f0f0; padding:10px; border-radius:6px; white-space:pre-wrap; }
+    small { color:#666; }
   </style>
 </head>
 <body>
-
-<h1>Car Sharing Planner</h1>
+<h1>Car Sharing Planner (Minimal)</h1>
 
 <div class="box">
   <h2>People</h2>
   <label>Name: <input id="personName"></label>
   <label>Has car: <input type="checkbox" id="personCar"></label>
-  <button onclick="addPerson()">Add Person</button>
+  <button id="btnAddPerson">Add Person</button>
   <ul id="peopleList"></ul>
 </div>
 
 <div class="box">
   <h2>Shifts</h2>
-  <label>Day: <input id="dayName"></label>
+  <label>Day: <input id="dayName" placeholder="e.g. 01/09"></label>
   <label>Person: <select id="shiftPerson"></select></label>
-  <label>Start: <input id="shiftStart" placeholder="e.g. 07:45"></label>
-  <label>End: <input id="shiftEnd" placeholder="e.g. 12:45"></label>
-  <button onclick="addShift()">Add Shift</button>
+  <label>Start: <input id="shiftStart" placeholder="07:45"></label>
+  <label>End: <input id="shiftEnd" placeholder="12:45"></label>
+  <button id="btnAddShift">Add Shift</button>
   <ul id="shiftList"></ul>
 </div>
 
 <div class="box">
   <h2>Plan</h2>
-  <label>Car capacity: <input id="capacity" value="4" type="number" min="1"></label>
-  <button onclick="generatePlan()">Generate Plan</button>
+  <label>Car capacity: <input id="capacity" type="number" min="1" value="4"></label>
+  <button id="btnGenerate">Generate Plan</button>
   <pre id="output"></pre>
+  <small>Note: drivers are chosen independently for start and return groups to minimize cars. Passengers can change cars between trips.</small>
 </div>
 
 <script>
 const state = { people: [], shifts: [] };
 
-function refreshPeople() {
-  const ul = document.getElementById("peopleList");
-  const sel = document.getElementById("shiftPerson");
-  ul.innerHTML = '';
-  sel.innerHTML = '';
-  for (const p of state.people) {
-    ul.innerHTML += `<li>${p.name} ${p.hasCar ? '(🚗)' : ''}</li>`;
+function by(arr, keyFn){
+  const m = {};
+  for (const x of arr){ const k = keyFn(x); (m[k] ||= []).push(x); }
+  return m;
+}
+
+function refreshPeople(){
+  const ul = document.getElementById('peopleList');
+  const sel = document.getElementById('shiftPerson');
+  ul.innerHTML = ''; sel.innerHTML = '';
+  for (const p of state.people){
+    ul.innerHTML += `<li>${p.name} ${p.hasCar ? '🚗' : ''}</li>`;
     sel.innerHTML += `<option value="${p.name}">${p.name}</option>`;
   }
 }
 
-function addPerson() {
-  const name = document.getElementById("personName").value.trim();
-  const hasCar = document.getElementById("personCar").checked;
-  if (!name) return alert("Enter a name");
-  if (state.people.some(p => p.name === name)) return alert("Already exists");
-  state.people.push({ name, hasCar });
-  refreshPeople();
-}
-
-function refreshShifts() {
-  const ul = document.getElementById("shiftList");
+function refreshShifts(){
+  const ul = document.getElementById('shiftList');
   ul.innerHTML = '';
-  for (const s of state.shifts) {
+  for (const s of state.shifts){
     ul.innerHTML += `<li>${s.day}: ${s.person} ${s.start}→${s.end}</li>`;
   }
 }
 
-function addShift() {
-  const person = document.getElementById("shiftPerson").value;
-  const day = document.getElementById("dayName").value.trim();
-  const start = document.getElementById("shiftStart").value.trim();
-  const end = document.getElementById("shiftEnd").value.trim();
-  if (!day || !person || !start || !end) return alert("Fill all fields");
-  state.shifts.push({ day, person, start, end });
+document.getElementById('btnAddPerson').onclick = () => {
+  const name = document.getElementById('personName').value.trim();
+  const car = document.getElementById('personCar').checked;
+  if (!name) return alert('Enter a name');
+  if (state.people.some(p=>p.name===name)) return alert('Name exists');
+  state.people.push({name, hasCar:car});
+  refreshPeople();
+};
+
+document.getElementById('btnAddShift').onclick = () => {
+  const day = document.getElementById('dayName').value.trim();
+  const person = document.getElementById('shiftPerson').value;
+  const start = document.getElementById('shiftStart').value.trim();
+  const end = document.getElementById('shiftEnd').value.trim();
+  if (!day || !person || !start || !end) return alert('Fill all fields');
+  if (!state.people.some(p=>p.name===person)) return alert('Unknown person');
+  state.shifts.push({day, person, start, end});
   refreshShifts();
-}
+};
 
-function groupBy(arr, key) {
-  const out = {};
-  for (const a of arr) {
-    const k = key(a);
-    if (!out[k]) out[k] = [];
-    out[k].push(a);
+function minimalCarsForGroup(members, capacity, peopleMap){
+  // members: array of person names in this group
+  const need = Math.ceil(members.length / capacity);
+  const drivers = members.filter(n => peopleMap[n]?.hasCar);
+  const chosen = drivers.slice(0, need); // minimal pick
+  const cars = chosen.map(d => ({driver:d, passengers:[]}));
+  // fill passengers round-robin (excluding drivers so they don't "duplicate")
+  let i = 0;
+  for (const p of members){
+    if (chosen.includes(p)) continue;
+    if (!cars.length){ cars.push({driver:p, passengers:[]}); } // if no drivers, promote (no-car users here will imply no capacity to move, but we keep simple)
+    const c = cars[i % cars.length];
+    if (c.passengers.length < capacity-1) c.passengers.push(p);
+    else { cars.push({driver:p, passengers:[]}); i = cars.length-1; }
+    i++;
   }
-  return out;
+  return cars;
 }
 
-function generatePlan() {
-  const cap = Math.max(1, parseInt(document.getElementById("capacity").value));
-  const out = document.getElementById("output");
-  if (!state.shifts.length) return out.textContent = "No shifts.";
-  let result = "";
+document.getElementById('btnGenerate').onclick = () => {
+  const cap = Math.max(1, parseInt(document.getElementById('capacity').value||'4',10));
+  const out = document.getElementById('output');
+  if (!state.shifts.length){ out.textContent = 'No shifts.'; return; }
+  const peopleMap = Object.fromEntries(state.people.map(p=>[p.name,p]));
+  let txt='';
+  const days = by(state.shifts, s=>s.day);
+  for (const [day, shifts] of Object.entries(days)){
+    txt += `=== ${day} ===\n`;
+    const startGroups = by(shifts, s=>s.start);
+    const endGroups   = by(shifts, s=>s.end);
 
-  const byDay = groupBy(state.shifts, s => s.day);
-  for (const [day, shifts] of Object.entries(byDay)) {
-    result += `=== ${day} ===\n`;
-
-    const hasCar = Object.fromEntries(state.people.map(p => [p.name, p.hasCar]));
-
-    // Compute minimal set of drivers covering starts and ends
-    const byStart = groupBy(shifts, s => s.start);
-    const byEnd   = groupBy(shifts, s => s.end);
-
-    const needStart = Object.fromEntries(Object.entries(byStart).map(([k,v]) => [k, Math.ceil(v.length / cap)]));
-    const needEnd   = Object.fromEntries(Object.entries(byEnd).map(([k,v]) => [k, Math.ceil(v.length / cap)]));
-
-    const startOf = Object.fromEntries(shifts.map(s => [s.person, s.start]));
-    const endOf   = Object.fromEntries(shifts.map(s => [s.person, s.end]));
-
-    const drivers = new Set();
-    function remaining() {
-      return Object.values(needStart).some(v=>v>0) || Object.values(needEnd).some(v=>v>0);
-    }
-    while (remaining()) {
-      let best = null, bestGain = 0;
-      for (const s of shifts) {
-        const p = s.person;
-        if (!hasCar[p] || drivers.has(p)) continue;
-        const gain = (needStart[startOf[p]]>0?1:0) + (needEnd[endOf[p]]>0?1:0);
-        if (gain > bestGain) { best = p; bestGain = gain; }
-      }
-      if (!best) break;
-      drivers.add(best);
-      needStart[startOf[best]] = Math.max(0, needStart[startOf[best]]-1);
-      needEnd[endOf[best]]     = Math.max(0, needEnd[endOf[best]]-1);
-    }
-
-    const assign = (groups) => {
-      const cars = {};
-      for (const [k, arr] of Object.entries(groups)) {
-        const members = arr.map(x => x.person);
-        const localDrivers = members.filter(m => drivers.has(m));
-        const carList = localDrivers.map(d => ({ driver: d, passengers: [] }));
-        const others = members.filter(m => !drivers.has(m));
-        let ci = 0;
-        for (const p of others) {
-          if (!carList.length) carList.push({ driver: p, passengers: [] });
-          const c = carList[ci];
-          if (c.passengers.length < cap-1) c.passengers.push(p);
-          else { carList.push({ driver: p, passengers: [] }); ci = carList.length-1; }
-          ci = (ci + 1) % carList.length;
-        }
-        cars[k] = carList;
-      }
-      return cars;
-    };
-
-    const morning = assign(byStart);
-    const evening = assign(byEnd);
-
-    for (const [start, cars] of Object.entries(morning)) {
-      result += `Start ${start}:\n`;
-      for (const c of cars) {
-        result += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
+    // Morning
+    for (const [start, arr] of Object.entries(startGroups)){
+      const members = arr.map(x=>x.person);
+      const cars = minimalCarsForGroup(members, cap, peopleMap);
+      txt += `Start ${start}:\n`;
+      for (const c of cars){
+        txt += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
       }
     }
-    for (const [end, cars] of Object.entries(evening)) {
-      result += `Return ${end}:\n`;
-      for (const c of cars) {
-        result += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
+    // Evening
+    for (const [end, arr] of Object.entries(endGroups)){
+      const members = arr.map(x=>x.person);
+      const cars = minimalCarsForGroup(members, cap, peopleMap);
+      txt += `Return ${end}:\n`;
+      for (const c of cars){
+        txt += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
       }
     }
-    result += "\n";
+    txt += '\n';
   }
-
-  out.textContent = result;
-}
+  out.textContent = txt;
+};
 </script>
 </body>
 </html>
