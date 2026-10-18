@@ -1,4 +1,4 @@
-import { DAYS, STORAGE_KEY, emptyState, normalizeState, validateVisits, applyTemplate, planDay, monday, addDays } from './planner.js';
+import { DAYS, STORAGE_KEY, emptyState, normalizeState, validateVisits, applyTemplate, planDay, monday, addDays, autonomousPeople } from './planner.js';
 
 const $ = id => document.getElementById(id);
 const uid = () => crypto.randomUUID();
@@ -59,6 +59,7 @@ function renderVisits(scope, day, rows) {
   $(`${scope}DayTitle`).textContent = scope === 'week' ? `${DAYS[day]} ${formatDate(addDays(week, day))}` : DAYS[day];
   const target = $(`${scope}Visits`); target.replaceChildren();
   const dayVisits = rows.filter(v => v.day === day);
+  const independent = autonomousPeople(dayVisits);
   if (!dayVisits.length) { target.append(node('div', state.people.length ? 'Nessuna fascia per questo giorno. Aggiungi un ingresso e un’uscita per ogni collega che viaggia.' : 'Inizia da “Colleghi e auto”, oppure importa gli orari già preparati.', 'empty')); return; }
   for (const person of [...state.people].sort((a, b) => a.name.localeCompare(b.name, 'it'))) {
     const visits = dayVisits.filter(v => v.personId === person.id).sort((a, b) => a.start.localeCompare(b.start));
@@ -67,7 +68,8 @@ function renderVisits(scope, day, rows) {
     const list = node('div', undefined, 'visit-list');
     visits.forEach((v, index) => {
       const item = node('div', undefined, 'visit'); item.append(node('span', `${v.start} – ${v.end}`, 'visit-time'));
-      if (visits.length > 1) item.append(node('span', `${index + 1}ª andata e ritorno`, 'badge'));
+      if (independent.has(person.id)) item.append(node('span', v.site === 'falcade' ? 'Falcade · autonomo' : 'Autonomo per questo giorno', 'badge'));
+      else if (visits.length > 1) item.append(node('span', `${index + 1}ª andata e ritorno`, 'badge'));
       if (v.needsReview) item.append(node('span', 'Da verificare', 'badge review'));
       const actions = node('div', undefined, 'visit-actions');
       actions.append(button('Modifica', () => openVisit(scope, v)), button('Rimuovi', () => change(next => {
@@ -119,13 +121,14 @@ function openVisit(scope, visit = null, personId = null) {
   $('visitContext').textContent = `${DAYS[editing.day]}${scope === 'week' ? ` ${formatDate(addDays(week, editing.day))} · Solo questa settimana` : ' · Orario tipo'}`;
   $('visitPerson').replaceChildren(...state.people.map(p => { const option = node('option', p.name); option.value = p.id; return option; }));
   $('visitPerson').value = visit?.personId || personId || state.people[0]?.id || '';
+  $('visitSite').value = visit?.site || 'common';
   $('visitStart').value = visit?.start || ''; $('visitEnd').value = visit?.end || ''; $('visitNote').value = visit?.note || '';
   $('visitReviewed').checked = false; $('reviewLabel').hidden = !visit?.needsReview; $('visitError').textContent = ''; $('visitDialog').showModal();
 }
 $('visitForm').onsubmit = event => {
   event.preventDefault();
   const next = structuredClone(state), rows = editing.scope === 'template' ? next.template : (next.weeks[week] ||= []), old = rows.find(v => v.id === editing.id);
-  const visit = { id: editing.id || uid(), personId: $('visitPerson').value, day: editing.day, start: $('visitStart').value, end: $('visitEnd').value, note: $('visitNote').value.trim(), needsReview: Boolean(old?.needsReview && !$('visitReviewed').checked) };
+  const visit = { id: editing.id || uid(), personId: $('visitPerson').value, day: editing.day, start: $('visitStart').value, end: $('visitEnd').value, site: $('visitSite').value, note: $('visitNote').value.trim(), needsReview: Boolean(old?.needsReview && !$('visitReviewed').checked) };
   const proposed = [...rows.filter(v => v.id !== editing.id), visit];
   try {
     const issues = validateVisits(proposed.filter(v => v.personId === visit.personId && v.day === visit.day), next.people, next.settings.travelMinutes);
@@ -185,11 +188,12 @@ $('generateButton').onclick = () => {
   });
   const output = $('planOutput'); output.replaceChildren();
   const failed = lastPlan.filter(p => !p.result.ok).length, journeys = lastPlan.reduce((sum, p) => sum + p.result.carJourneys, 0), summary = node('div', undefined, 'plan-summary');
-  summary.append(node('p', failed ? `${failed} giorni da sistemare. ${journeys} viaggi in auto nei giorni già organizzabili.` : `${journeys} viaggi in auto per la settimana. Andate e ritorni sono conteggiati separatamente.`));
+  summary.append(node('p', failed ? `${failed} giorni da sistemare. ${journeys} viaggi in auto sulla tratta comune nei giorni già organizzabili.` : `${journeys} viaggi in auto sulla tratta comune per la settimana. Andate e ritorni sono conteggiati separatamente.`));
   summary.append(button('Scarica il piano', () => download(`piano-viaggi-${week}.txt`, planText(), 'text/plain'), 'secondary')); output.append(summary);
   for (const { name, day, result } of lastPlan) {
-    if (!result.trips.length && result.ok) continue;
+    if (!result.trips.length && result.ok && !result.autonomous.length) continue;
     const section = node('section', undefined, 'plan-day'); section.append(node('h3', `${name} ${formatDate(addDays(week, day))}`));
+    if (result.autonomous.length) section.append(node('p', `Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio assegnato sulla tratta comune.`, 'help'));
     if (!result.ok) {
       const warning = node('div', undefined, 'warning'); warning.append(node('strong', 'Nessun piano completo per questo giorno.'));
       const list = node('ul'); result.issues.forEach(issue => list.append(node('li', issue))); warning.append(list); section.append(warning);
@@ -210,8 +214,9 @@ function planText() {
   const lines = [`VIAGGI A SCUOLA · settimana del ${formatDate(week)}`, `Tratta: ${state.settings.travelMinutes} minuti. Posti per auto: ${state.settings.capacity}, conducente incluso.`, 'Orari esatti; ogni conducente porta e riporta la propria auto.', ''];
   if (state.importNotes.length) lines.push('Note degli orari importati:', ...state.importNotes, '');
   for (const { name, day, result } of lastPlan || []) {
-    if (!result.trips.length && result.ok) continue;
+    if (!result.trips.length && result.ok && !result.autonomous.length) continue;
     lines.push(`${name} ${formatDate(addDays(week, day))}`);
+    if (result.autonomous.length) lines.push(`Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio sulla tratta comune.`);
     if (!result.ok) lines.push('DA SISTEMARE: nessun piano completo.', ...result.issues);
     for (const trip of result.trips) {
       lines.push(`${trip.departure} ${trip.direction === 'out' ? 'Andata' : 'Ritorno'} (arrivo ${trip.arrival})`);

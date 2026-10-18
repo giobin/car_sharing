@@ -4,7 +4,50 @@ import { emptyState, normalizeState, validateVisits, applyTemplate, planDay, mon
 
 const settings = { capacity: 4, travelMinutes: 45 };
 const person = (id, hasCar = true) => ({ id, name: id, hasCar });
-const visit = (id, personId, start = '07:45', end = '12:45', day = 0) => ({ id, personId, day, start, end, note: '', needsReview: false });
+const visit = (id, personId, start = '07:45', end = '12:45', day = 0) => ({ id, personId, day, start, end, site: 'common', note: '', needsReview: false });
+
+test('Falcade is autonomous for the day, with no offered or requested shared seats', () => {
+  for (const hasCar of [true, false]) {
+    const people = [person('Anna'), person('Bruno', hasCar), person('Carla', false)];
+    const shared = [visit('a','Anna'),visit('c','Carla')];
+    const result = planDay([...shared,{...visit('b','Bruno'),site:'falcade'}],people,settings);
+    checkPlan(result,shared,people,4);
+    assert.deepEqual(result.autonomous,['Bruno']);
+    assert.equal(result.carJourneys,2);
+  }
+});
+
+test('Falcade cannot cover missing shared-route drivers, including mixed-site days', () => {
+  const people = [person('Anna'),person('Bruno',false)];
+  const rows = [visit('a','Anna','07:45','10:45'),{...visit('f','Anna','11:00','13:00'),site:'falcade'},visit('b','Bruno','07:45','10:45')];
+  const result = planDay(rows,people,settings);
+  assert.equal(result.ok,false);
+  assert.deepEqual(result.trips,[]);
+  assert.deepEqual(result.autonomous,['Anna']);
+  assert.match(result.issues.join(' '), /0 disponibili/);
+  assert.equal(people[0].hasCar,true);
+  const nextDay = planDay([visit('a2','Anna','07:45','12:45',1),visit('b2','Bruno','07:45','12:45',1)],people,settings);
+  assert.equal(nextDay.ok,true);
+  assert.equal(nextDay.trips[0].cars[0].driver,'Anna');
+});
+
+test('Falcade-only days remain visible and do not use the common-route journey duration', () => {
+  const result = planDay([{...visit('f','Anna','00:30','12:45'),site:'falcade'}],[person('Anna')],settings);
+  assert.equal(result.ok,true);
+  assert.equal(result.carJourneys,0);
+  assert.deepEqual(result.trips,[]);
+  assert.deepEqual(result.autonomous,['Anna']);
+});
+
+test('Falcade survives backup and weekly copies; old records default to common route', () => {
+  const state = emptyState(); state.people = [person('Anna')]; state.template = [{...visit('f','Anna'),site:'falcade'}];
+  const copy = normalizeState(JSON.parse(JSON.stringify(applyTemplate(state,'2026-10-19',()=> 'copy'))));
+  assert.equal(copy.template[0].site,'falcade'); assert.equal(copy.weeks['2026-10-19'][0].site,'falcade');
+  copy.weeks['2026-10-19'][0].site='common'; assert.equal(copy.template[0].site,'falcade');
+  const old = structuredClone(state); delete old.template[0].site;
+  assert.equal(normalizeState(old).template[0].site,'common');
+  old.template[0].site='unknown'; assert.throws(()=>normalizeState(old),/Sede non valida/);
+});
 function checkPlan(result, visits, people, capacity) {
   assert.equal(result.ok, true);
   const driven = new Map();

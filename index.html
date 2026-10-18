@@ -46,6 +46,8 @@
       <div class="card-heading"><h2 id="visitDialogTitle">Aggiungi una fascia</h2><button type="button" class="text-button" id="closeVisit">Chiudi</button></div>
       <p id="visitContext" class="help"></p>
       <label>Collega<select id="visitPerson" required></select></label>
+      <label>Sede<select id="visitSite"><option value="common">Sede della tratta comune</option><option value="falcade">Falcade · spostamenti autonomi</option></select></label>
+      <p class="help">Con un impegno a Falcade il collega viaggia autonomamente per quel giorno: non offre né richiede passaggi sulla tratta comune. La disponibilità negli altri giorni resta invariata.</p>
       <div class="two-columns"><label>Ingresso a scuola<input id="visitStart" type="time" required></label><label>Uscita da scuola<input id="visitEnd" type="time" required></label></div>
       <p class="help">Ogni fascia comprende il viaggio di andata e quello di ritorno. Per risalire nel pomeriggio aggiungi un’altra fascia.</p>
       <label>Nota (facoltativa)<textarea id="visitNote" maxlength="2000" rows="2"></textarea></label>

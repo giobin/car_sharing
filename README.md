@@ -10,6 +10,8 @@ Planner statico per colleghi che condividono un unico punto di ritrovo e una sed
 4. Ogni fascia comprende un ingresso e un'uscita dalla sede. Per un rientro intermedio aggiungere una seconda fascia allo stesso collega e giorno. Un'ora buca trascorsa in sede resta nella stessa fascia.
 5. Premere **Calcola la settimana**. I giorni senza abbastanza auto o con fasce da verificare vengono segnalati e non producono assegnazioni parziali spacciate per complete.
 
+La sede **Falcade** (sigla F nell'orario) indica uno spostamento autonomo. Per impostazione, chi ha un impegno a Falcade non offre né richiede passaggi sulla tratta comune per quel giorno, anche se ha altre fasce nella sede comune. Il programma lo mostra esplicitamente tra gli autonomi; la disponibilità auto degli altri giorni resta invariata. Gli spostamenti autonomi non rientrano nel conteggio dei viaggi condivisi e non usano la durata della tratta comune. La sede si può modificare nell'orario tipo o nella singola settimana.
+
 Gli orari sono salvati nel `localStorage` del browser e del dominio corrente. Non c'è sincronizzazione fra dispositivi, colleghi o URL Vercel differenti. Usare **Esporta backup** per trasferirli o conservarne una copia. L'importazione e il ripristino di una settimana richiedono conferma; le ultime 20 modifiche si possono annullare fino alla chiusura/ricarica della pagina. Le settimane già preparate, anche se vuote, non vengono sovrascritte automaticamente.
 
 L'importazione supporta sia il formato versione 2 sia i vecchi file `{ people, days }`: i giorni con data diventano settimane concrete, quelli con il solo nome del giorno diventano un orario tipo. Nel formato con soli nomi delle persone la disponibilità auto è da impostare.

@@ -42,22 +42,30 @@ function idCheck(id) {
   return typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
 }
 
+// An appointment at the other workplace makes the whole person's day
+// independent. It must not disable their car for the rest of the week.
+export function autonomousPeople(visits) {
+  return new Set(visits.filter(v => v.site === 'falcade').map(v => v.personId));
+}
+
 export function validateVisits(visits, people, travelMinutes) {
   const issues = [];
   const names = new Map(people.map(p => [p.id, p.name]));
   const groups = new Map();
   const ids = new Set();
+  const independentDays = new Set(visits.filter(v => v.site === 'falcade').map(v => `${v.day}/${v.personId}`));
   for (const visit of visits) {
     if (!idCheck(visit.id) || ids.has(visit.id)) throw new Error('Identificatore di fascia mancante o duplicato.');
     ids.add(visit.id);
     if (!names.has(visit.personId)) throw new Error('Una fascia fa riferimento a un collega inesistente.');
     if (!Number.isInteger(visit.day) || visit.day < 0 || visit.day > 6) throw new Error('Giorno della settimana non valido.');
+    if (visit.site !== undefined && !['common', 'falcade'].includes(visit.site)) throw new Error('Sede non valida.');
     if (typeof visit.note !== 'undefined' && (typeof visit.note !== 'string' || visit.note.length > 2000)) throw new Error('Nota non valida o troppo lunga.');
     if (typeof visit.needsReview !== 'undefined' && typeof visit.needsReview !== 'boolean') throw new Error('Stato di verifica non valido.');
     const start = minutes(visit.start), end = minutes(visit.end);
     if (start >= end) throw new Error(`${names.get(visit.personId)}: l'uscita deve essere successiva all'ingresso.`);
-    if (start < travelMinutes || end + travelMinutes >= 1440) throw new Error(`${names.get(visit.personId)}: il viaggio deve concludersi nella stessa giornata.`);
     const key = `${visit.day}/${visit.personId}`;
+    if (!independentDays.has(key) && (start < travelMinutes || end + travelMinutes >= 1440)) throw new Error(`${names.get(visit.personId)}: il viaggio deve concludersi nella stessa giornata.`);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(visit);
   }
@@ -67,7 +75,7 @@ export function validateVisits(visits, people, travelMinutes) {
       const a = group[i - 1], b = group[i];
       const gap = minutes(b.start) - minutes(a.end);
       if (gap < 0) throw new Error(`${names.get(a.personId)}, ${DAYS[a.day]}: le fasce si sovrappongono.`);
-      if (gap < travelMinutes * 2) issues.push(`${names.get(a.personId)}, ${DAYS[a.day]}: tra l'uscita delle ${a.end} e l'ingresso delle ${b.start} servono almeno ${travelMinutes * 2} minuti per tornare al ritrovo e ripartire.`);
+      if (!independentDays.has(`${a.day}/${a.personId}`) && gap < travelMinutes * 2) issues.push(`${names.get(a.personId)}, ${DAYS[a.day]}: tra l'uscita delle ${a.end} e l'ingresso delle ${b.start} servono almeno ${travelMinutes * 2} minuti per tornare al ritrovo e ripartire.`);
     }
   }
   return issues;
@@ -88,7 +96,7 @@ export function normalizeState(input) {
     if (!Array.isArray(rows) || rows.length > 1000) throw new Error('Elenco delle fasce non valido.');
     return rows.map(v => {
       if (!v || typeof v !== 'object') throw new Error('Fascia non valida.');
-      return { id: v.id, personId: v.personId, day: v.day, start: v.start, end: v.end, note: v.note ?? '', needsReview: v.needsReview ?? false };
+      return { id: v.id, personId: v.personId, day: v.day, start: v.start, end: v.end, site: v.site ?? 'common', note: v.note ?? '', needsReview: v.needsReview ?? false };
     });
   };
   const template = cleanVisits(input.template);
@@ -191,8 +199,10 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
   const issues = validateVisits(visits, people, settings.travelMinutes);
   if (new Set(visits.map(v => v.day)).size > 1) throw new Error('Pianifica un giorno alla volta.');
   const byId = new Map(people.map(p => [p.id, p]));
+  const autonomous = [...autonomousPeople(visits)];
+  visits = visits.filter(v => !autonomous.includes(v.personId));
   for (const v of visits) if (v.needsReview) issues.push(`${byId.get(v.personId).name}: verifica la fascia ${v.start}–${v.end}${v.note ? ` (${v.note})` : ''}.`);
-  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0 };
+  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0, autonomous };
   const groups = [], groupIndex = new Map();
   function addGroup(direction, at, visit) {
     const key = `${direction}/${at}`;
@@ -211,9 +221,9 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
     const need = Math.ceil(g.members.length / settings.capacity);
     if (available < need) issues.push(`${g.direction === 'out' ? 'Andata, ingresso' : 'Ritorno, uscita'} ${g.time}: ${g.members.length} persone, ${need} auto necessarie e ${available} disponibili. Colleghi: ${g.members.map(id => byId.get(id).name).join(', ')}.`);
   }
-  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0 };
+  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0, autonomous };
   const chosen = selectDrivers(groups, candidates, settings.capacity, driveCounts);
-  if (!chosen) return { ok: false, issues: ['Non è possibile coprire tutte le corse con le auto disponibili.'], trips: [], carJourneys: 0 };
+  if (!chosen) return { ok: false, issues: ['Non è possibile coprire tutte le corse con le auto disponibili.'], trips: [], carJourneys: 0, autonomous };
   const trips = groups.map(g => {
     const drivers = g.members.filter((_, i) => chosen.has(g.visits[i]));
     const cars = drivers.map(driver => ({ driver, passengers: [] }));
@@ -224,5 +234,5 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
     return { ...g, departure: g.direction === 'out' ? time(minutes(g.time) - settings.travelMinutes) : g.time,
       arrival: g.direction === 'out' ? g.time : time(minutes(g.time) + settings.travelMinutes), cars };
   }).sort((a, b) => a.departure.localeCompare(b.departure) || a.direction.localeCompare(b.direction));
-  return { ok: true, issues: [], trips, carJourneys: chosen.size * 2 };
+  return { ok: true, issues: [], trips, carJourneys: chosen.size * 2, autonomous };
 }
