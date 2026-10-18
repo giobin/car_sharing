@@ -1,150 +1,60 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <title>Car Sharing Planner - Minimal</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 20px; background:#fafafa; }
-    h1 { margin-bottom: 8px; }
-    h2 { margin: 14px 0 6px; }
-    .box { background: #fff; border: 1px solid #ddd; padding: 12px; border-radius: 6px; margin: 12px 0; }
-    label { display:block; margin:6px 0; }
-    input, select { padding:4px; }
-    button { margin-top:6px; padding:6px 10px; }
-    ul { margin:6px 0; }
-    pre { background:#f0f0f0; padding:10px; border-radius:6px; white-space:pre-wrap; }
-    small { color:#666; }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176451">
+  <title>Viaggi a scuola · Car sharing</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
 </head>
 <body>
-<h1>Car Sharing Planner (Minimal)</h1>
-
-<div class="box">
-  <h2>People</h2>
-  <label>Name: <input id="personName"></label>
-  <label>Has car: <input type="checkbox" id="personCar"></label>
-  <button id="btnAddPerson">Add Person</button>
-  <ul id="peopleList"></ul>
-</div>
-
-<div class="box">
-  <h2>Shifts</h2>
-  <label>Day: <input id="dayName" placeholder="e.g. 01/09"></label>
-  <label>Person: <select id="shiftPerson"></select></label>
-  <label>Start: <input id="shiftStart" placeholder="07:45"></label>
-  <label>End: <input id="shiftEnd" placeholder="12:45"></label>
-  <button id="btnAddShift">Add Shift</button>
-  <ul id="shiftList"></ul>
-</div>
-
-<div class="box">
-  <h2>Plan</h2>
-  <label>Car capacity: <input id="capacity" type="number" min="1" value="4"></label>
-  <button id="btnGenerate">Generate Plan</button>
-  <pre id="output"></pre>
-  <small>Note: drivers are chosen independently for start and return groups to minimize cars. Passengers can change cars between trips.</small>
-</div>
-
-<script>
-const state = { people: [], shifts: [] };
-
-function by(arr, keyFn){
-  const m = {};
-  for (const x of arr){ const k = keyFn(x); (m[k] ||= []).push(x); }
-  return m;
-}
-
-function refreshPeople(){
-  const ul = document.getElementById('peopleList');
-  const sel = document.getElementById('shiftPerson');
-  ul.innerHTML = ''; sel.innerHTML = '';
-  for (const p of state.people){
-    ul.innerHTML += `<li>${p.name} ${p.hasCar ? '🚗' : ''}</li>`;
-    sel.innerHTML += `<option value="${p.name}">${p.name}</option>`;
-  }
-}
-
-function refreshShifts(){
-  const ul = document.getElementById('shiftList');
-  ul.innerHTML = '';
-  for (const s of state.shifts){
-    ul.innerHTML += `<li>${s.day}: ${s.person} ${s.start}→${s.end}</li>`;
-  }
-}
-
-document.getElementById('btnAddPerson').onclick = () => {
-  const name = document.getElementById('personName').value.trim();
-  const car = document.getElementById('personCar').checked;
-  if (!name) return alert('Enter a name');
-  if (state.people.some(p=>p.name===name)) return alert('Name exists');
-  state.people.push({name, hasCar:car});
-  refreshPeople();
-};
-
-document.getElementById('btnAddShift').onclick = () => {
-  const day = document.getElementById('dayName').value.trim();
-  const person = document.getElementById('shiftPerson').value;
-  const start = document.getElementById('shiftStart').value.trim();
-  const end = document.getElementById('shiftEnd').value.trim();
-  if (!day || !person || !start || !end) return alert('Fill all fields');
-  if (!state.people.some(p=>p.name===person)) return alert('Unknown person');
-  state.shifts.push({day, person, start, end});
-  refreshShifts();
-};
-
-function minimalCarsForGroup(members, capacity, peopleMap){
-  // members: array of person names in this group
-  const need = Math.ceil(members.length / capacity);
-  const drivers = members.filter(n => peopleMap[n]?.hasCar);
-  const chosen = drivers.slice(0, need); // minimal pick
-  const cars = chosen.map(d => ({driver:d, passengers:[]}));
-  // fill passengers round-robin (excluding drivers so they don't "duplicate")
-  let i = 0;
-  for (const p of members){
-    if (chosen.includes(p)) continue;
-    if (!cars.length){ cars.push({driver:p, passengers:[]}); } // if no drivers, promote (no-car users here will imply no capacity to move, but we keep simple)
-    const c = cars[i % cars.length];
-    if (c.passengers.length < capacity-1) c.passengers.push(p);
-    else { cars.push({driver:p, passengers:[]}); i = cars.length-1; }
-    i++;
-  }
-  return cars;
-}
-
-document.getElementById('btnGenerate').onclick = () => {
-  const cap = Math.max(1, parseInt(document.getElementById('capacity').value||'4',10));
-  const out = document.getElementById('output');
-  if (!state.shifts.length){ out.textContent = 'No shifts.'; return; }
-  const peopleMap = Object.fromEntries(state.people.map(p=>[p.name,p]));
-  let txt='';
-  const days = by(state.shifts, s=>s.day);
-  for (const [day, shifts] of Object.entries(days)){
-    txt += `=== ${day} ===\n`;
-    const startGroups = by(shifts, s=>s.start);
-    const endGroups   = by(shifts, s=>s.end);
-
-    // Morning
-    for (const [start, arr] of Object.entries(startGroups)){
-      const members = arr.map(x=>x.person);
-      const cars = minimalCarsForGroup(members, cap, peopleMap);
-      txt += `Start ${start}:\n`;
-      for (const c of cars){
-        txt += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
-      }
-    }
-    // Evening
-    for (const [end, arr] of Object.entries(endGroups)){
-      const members = arr.map(x=>x.person);
-      const cars = minimalCarsForGroup(members, cap, peopleMap);
-      txt += `Return ${end}:\n`;
-      for (const c of cars){
-        txt += `  🚗 ${c.driver} -> [${c.passengers.join(', ') || '—'}]\n`;
-      }
-    }
-    txt += '\n';
-  }
-  out.textContent = txt;
-};
-</script>
+  <header class="site-header">
+    <div><p class="eyebrow">CAR SHARING TRA COLLEGHI</p><h1>Viaggi a scuola</h1><p>Una tratta, meno auto. Organizzate insieme andata e ritorno.</p></div>
+    <div class="header-actions"><button id="importButton" class="secondary">Importa orari</button><button id="exportButton" class="secondary">Esporta backup</button><input id="importFile" type="file" accept=".json,application/json" hidden></div>
+  </header>
+  <main>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div id="storageWarning" class="warning" role="alert" hidden></div>
+    <nav class="tabs" aria-label="Sezioni"><button data-tab="week" aria-current="page">Settimana</button><button data-tab="template">Orario tipo</button><button data-tab="people">Colleghi e auto</button></nav>
+    <section id="weekPanel" aria-labelledby="weekTitle">
+      <div class="section-heading"><div><p class="eyebrow">IL PROGRAMMA DA ORGANIZZARE</p><h2 id="weekTitle">La settimana</h2></div><label>Settimana del<input id="weekDate" type="date" required></label></div>
+      <div class="action-strip"><p id="weekSummary"></p><button id="applyButton">Precompila dall’orario tipo</button></div>
+      <div id="weekDays" class="day-tabs" aria-label="Giorno della settimana"></div>
+      <div class="card"><div class="card-heading"><h3 id="weekDayTitle"></h3><button id="addWeekVisit" class="secondary">Aggiungi fascia</button></div><div id="weekVisits"></div></div>
+      <div class="section-heading plan-heading"><div><p class="eyebrow">ANDATE E RITORNI</p><h2>Il piano dei viaggi</h2></div><button id="generateButton">Calcola la settimana</button></div>
+      <p class="help">Il piano rispetta gli orari esatti. Ogni conducente porta e riporta la propria auto; i passeggeri possono cambiare auto. Se mancano posti, vedrai le corse da sistemare.</p>
+      <div id="planOutput"><div class="empty">Prepara gli orari della settimana, poi calcola i viaggi.</div></div>
+    </section>
+    <section id="templatePanel" aria-labelledby="templateTitle" hidden>
+      <div class="section-heading"><div><p class="eyebrow">SI IMPOSTA UNA VOLTA</p><h2 id="templateTitle">L’orario settimanale tipo</h2><p>Salva gli orari abituali. Poi usali per precompilare ogni nuova settimana.</p></div></div>
+      <div id="importNotes" class="warning" hidden></div>
+      <div id="templateDays" class="day-tabs" aria-label="Giorno dell’orario tipo"></div>
+      <div class="card"><div class="card-heading"><h3 id="templateDayTitle"></h3><button id="addTemplateVisit" class="secondary">Aggiungi fascia</button></div><div id="templateVisits"></div></div>
+      <p class="help">Una fascia indica un’andata e un ritorno. Chi rientra al ritrovo e risale nel pomeriggio avrà due fasce nello stesso giorno. Un’ora buca a scuola resta nella stessa fascia.</p>
+    </section>
+    <section id="peoplePanel" aria-labelledby="peopleTitle" hidden>
+      <div class="section-heading"><div><p class="eyebrow">IL GRUPPO</p><h2 id="peopleTitle">Colleghi e auto</h2><p>Indica chi può guidare e mettere a disposizione la propria auto.</p></div></div>
+      <form id="personForm" class="card inline-form"><label>Nome del collega<input id="personName" maxlength="100" required autocomplete="off"></label><label class="checkbox"><input id="personCar" type="checkbox"> Auto disponibile</label><button>Aggiungi collega</button></form>
+      <div id="peopleList" class="people-grid"></div>
+      <form id="settingsForm" class="card"><h3>La tratta comune</h3><div class="inline-form"><label>Durata di un viaggio (minuti)<input id="travelMinutes" type="number" min="1" max="240" required></label><label>Posti per auto, conducente incluso<input id="capacity" type="number" min="1" max="9" required></label><button>Salva impostazioni</button></div><p class="help">La durata serve a calcolare la partenza dal ritrovo e a verificare che ci sia tempo per un rientro intermedio. I posti sono uguali per tutte le auto.</p></form>
+    </section>
+    <footer><span id="saveStatus">I dati restano in questo browser.</span> Usa il backup per trasferirli su un altro dispositivo. <button id="undoButton" class="text-button" disabled>Annulla ultima modifica</button></footer>
+  </main>
+  <dialog id="visitDialog" aria-labelledby="visitDialogTitle">
+    <form id="visitForm">
+      <div class="card-heading"><h2 id="visitDialogTitle">Aggiungi una fascia</h2><button type="button" class="text-button" id="closeVisit">Chiudi</button></div>
+      <p id="visitContext" class="help"></p>
+      <label>Collega<select id="visitPerson" required></select></label>
+      <div class="two-columns"><label>Ingresso a scuola<input id="visitStart" type="time" required></label><label>Uscita da scuola<input id="visitEnd" type="time" required></label></div>
+      <p class="help">Ogni fascia comprende il viaggio di andata e quello di ritorno. Per risalire nel pomeriggio aggiungi un’altra fascia.</p>
+      <label>Nota (facoltativa)<textarea id="visitNote" maxlength="2000" rows="2"></textarea></label>
+      <label class="checkbox" id="reviewLabel" hidden><input id="visitReviewed" type="checkbox"> Ho verificato gli orari e le indicazioni da chiarire.</label>
+      <p id="visitError" class="error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" id="cancelVisit" class="secondary">Annulla</button><button>Salva fascia</button></div>
+    </form>
+  </dialog>
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle"><h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="dialog-actions"><button id="cancelConfirm" class="secondary">Annulla</button><button id="acceptConfirm">Conferma</button></div></dialog>
+  <noscript>Attiva JavaScript per organizzare i viaggi.</noscript>
 </body>
 </html>
