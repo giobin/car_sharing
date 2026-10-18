@@ -1,10 +1,133 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyState, normalizeState, validateVisits, applyTemplate, planDay, monday, addDays, minutes } from './planner.js';
+import { emptyState, normalizeState, validateVisits, applyTemplate, planDay, monday, addDays, minutes, time } from './planner.js';
 
 const settings = { capacity: 4, travelMinutes: 45 };
 const person = (id, hasCar = true) => ({ id, name: id, hasCar });
-const visit = (id, personId, start = '07:45', end = '12:45', day = 0) => ({ id, personId, day, start, end, site: 'common', note: '', needsReview: false });
+const visit = (id, personId, start = '07:45', end = '12:45', day = 0) => ({ id, personId, day, start, end, site: 'common', canStayExtraHour: false, note: '', needsReview: false });
+const flexible = row => ({ ...row, canStayExtraHour: true });
+const adjustedVisits = (rows, result) => rows.map(v => ({ ...v, end: result.extensions.find(e => e.visitId === v.id)?.returnTime || v.end }));
+
+test('D can reduce two cars to one while preserving the scheduled end and both driver legs', () => {
+  const people = [person('Anna'), person('Bruno')];
+  const rows = [flexible(visit('a','Anna','07:45','10:45')), visit('b','Bruno','07:45','11:45')];
+  const before = structuredClone(rows), result = planDay(rows, people, settings);
+  checkPlan(result, adjustedVisits(rows, result), people, 4);
+  assert.equal(result.carJourneys, 2);
+  assert.deepEqual(result.extensions, [{ visitId:'a', personId:'Anna', scheduledEnd:'10:45', returnTime:'11:45', extraMinutes:60 }]);
+  assert.deepEqual(rows, before);
+  assert.equal(result.searchLimited, false);
+});
+
+test('D works for a passenger waiting for a driver and a driver waiting for a passenger', () => {
+  for (const driver of ['Anna','Bruno']) {
+    const people = [person('Anna',driver==='Anna'), person('Bruno',driver==='Bruno')];
+    const rows = [flexible(visit('a','Anna','07:45','10:45')), visit('b','Bruno','07:45','11:45')];
+    const result = planDay(rows, people, settings);
+    checkPlan(result, adjustedVisits(rows, result), people, 4);
+    assert.equal(result.trips[0].cars[0].driver, driver);
+    assert.equal(result.extensions[0].extraMinutes, 60);
+  }
+});
+
+test('D never advances a return, extends beyond one hour, or changes a non-consenting teacher', () => {
+  const people = [person('Anna'), person('Bruno')];
+  for (const [end, consent] of [['11:46',true],['10:15',true],['11:45',false]]) {
+    const rows = [{ ...visit('a','Anna','07:45','10:45'), canStayExtraHour:consent }, visit('b','Bruno','07:45',end)];
+    const result = planDay(rows,people,settings);
+    checkPlan(result,rows,people,4);
+    assert.equal(result.carJourneys,4);
+    assert.deepEqual(result.extensions,[]);
+  }
+  const rows = [flexible(visit('a','Anna','07:45','10:45')), visit('b','Bruno','07:45','11:15')];
+  const result = planDay(rows,people,settings);
+  assert.equal(result.carJourneys,2);
+  assert.equal(result.extensions[0].extraMinutes,30);
+});
+
+test('no extra hour is used when it cannot save cars, even to improve driving fairness', () => {
+  const people = [person('Anna'),person('Bruno')];
+  const rows = [flexible(visit('a','Anna','07:45','10:45')),visit('b','Bruno','08:45','11:45')];
+  const result = planDay(rows,people,settings,new Map([['Anna',8]]));
+  assert.equal(result.carJourneys,4); assert.deepEqual(result.extensions,[]);
+  checkPlan(result,rows,people,4);
+});
+
+test('D respects the time needed for the next round trip and can use a shorter extension', () => {
+  const people = [person('Anna'),person('Bruno')];
+  const rows = [flexible(visit('a1','Anna','07:45','10:45')),visit('a2','Anna','12:45','16:00'),visit('b','Bruno','07:45','11:45')];
+  const result = planDay(rows,people,settings);
+  assert.deepEqual(result.extensions,[]); assert.equal(result.carJourneys,6);
+  rows[2].end='11:15';
+  const possible = planDay(rows,people,settings);
+  assert.equal(possible.carJourneys,4); assert.equal(possible.extensions[0].extraMinutes,30);
+  const adjusted = adjustedVisits(rows,possible);
+  assert.deepEqual(validateVisits(adjusted,people,45),[]);
+  checkPlan(possible,adjusted,people,4);
+});
+
+test('D does not include Falcade, bypass reviews or rescue missing outbound cars', () => {
+  const people = [person('Anna'),person('Bruno',false)];
+  const rows = [{ ...flexible(visit('a','Anna','07:45','10:45')),site:'falcade' },visit('b','Bruno','07:45','11:45')];
+  const result = planDay(rows,people,settings);
+  assert.equal(result.ok,false); assert.deepEqual(result.extensions,[]); assert.deepEqual(result.autonomous,['Anna']);
+  rows[0].site='common'; rows[0].needsReview=true;
+  assert.equal(planDay(rows,people,settings).ok,false);
+  rows[0].needsReview=false; rows[1].start='08:45';
+  assert.equal(planDay(rows,people,settings).ok,false);
+});
+
+test('D survives backups and independent weekly copies; old records default to no extra hour', () => {
+  const state = emptyState(); state.people = [person('Anna')]; state.template = [flexible(visit('a','Anna'))];
+  const copy = normalizeState(JSON.parse(JSON.stringify(applyTemplate(state,'2026-10-19',()=> 'copy'))));
+  assert.equal(copy.template[0].canStayExtraHour,true); assert.equal(copy.weeks['2026-10-19'][0].canStayExtraHour,true);
+  copy.weeks['2026-10-19'][0].canStayExtraHour=false; assert.equal(copy.template[0].canStayExtraHour,true);
+  delete state.template[0].canStayExtraHour; assert.equal(normalizeState(state).template[0].canStayExtraHour,false);
+  state.template[0].canStayExtraHour='yes'; assert.throws(()=>normalizeState(state),/ora aggiuntiva/);
+});
+
+test('large flexible schedules return only complete plans and disclose a limited search', () => {
+  const people = Array.from({length:18},(_,i)=>person(`p${i}`));
+  const rows = people.map((p,i)=>flexible(visit(`v${i}`,p.id,'07:45',time(600+3*i))));
+  const result = planDay(rows,people,settings);
+  checkPlan(result,adjustedVisits(rows,result),people,4);
+  assert.equal(result.searchLimited,true);
+});
+
+test('flexible optimizer matches exhaustive times and driver subsets in 100 small cases', () => {
+  let seed = 131;
+  const random = () => { seed = (Math.imul(seed,1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let sample=0;sample<100;sample++) {
+    const count=2+Math.floor(random()*4), capacity=1+Math.floor(random()*3);
+    const people=Array.from({length:count},(_,i)=>person(`p${i}`,random()>.3));
+    const rows=people.map((p,i)=>({...visit(`v${i}`,p.id,random()<.8?'07:45':'08:45',time(600+30*Math.floor(random()*4))),canStayExtraHour:random()<.65}));
+    let bestCars=Infinity,bestWait=Infinity;
+    const assigned=rows.map(v=>({...v}));
+    function enumerate(index,wait) {
+      if(index<rows.length) {
+        for(let extra=0;extra<=(rows[index].canStayExtraHour?60:0);extra+=30) {
+          assigned[index].end=time(minutes(rows[index].end)+extra); enumerate(index+1,wait+extra);
+        }
+        return;
+      }
+      const candidates=assigned.filter(v=>people.find(p=>p.id===v.personId).hasCar);
+      for(let mask=0;mask<2**candidates.length;mask++) {
+        const selected=candidates.filter((_,i)=>mask&(1<<i));
+        const valid=['start','end'].every(key=>[...new Set(assigned.map(v=>v[key]))].every(at=>selected.filter(v=>v[key]===at).length*capacity>=assigned.filter(v=>v[key]===at).length));
+        if(valid && (selected.length<bestCars || (selected.length===bestCars && wait<bestWait))) {bestCars=selected.length;bestWait=wait;}
+      }
+    }
+    enumerate(0,0);
+    const result=planDay(rows,people,{...settings,capacity});
+    assert.equal(result.ok,Number.isFinite(bestCars),`sample ${sample}`);
+    assert.equal(result.searchLimited,false);
+    if(result.ok) {
+      assert.equal(result.carJourneys/2,bestCars,`cars, sample ${sample}`);
+      assert.equal(result.extensions.reduce((sum,e)=>sum+e.extraMinutes,0),bestWait,`waiting, sample ${sample}`);
+      checkPlan(result,adjustedVisits(rows,result),people,capacity);
+    }
+  }
+});
 
 test('Falcade is autonomous for the day, with no offered or requested shared seats', () => {
   for (const hasCar of [true, false]) {

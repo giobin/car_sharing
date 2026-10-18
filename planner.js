@@ -62,6 +62,7 @@ export function validateVisits(visits, people, travelMinutes) {
     if (visit.site !== undefined && !['common', 'falcade'].includes(visit.site)) throw new Error('Sede non valida.');
     if (typeof visit.note !== 'undefined' && (typeof visit.note !== 'string' || visit.note.length > 2000)) throw new Error('Nota non valida o troppo lunga.');
     if (typeof visit.needsReview !== 'undefined' && typeof visit.needsReview !== 'boolean') throw new Error('Stato di verifica non valido.');
+    if (typeof visit.canStayExtraHour !== 'undefined' && typeof visit.canStayExtraHour !== 'boolean') throw new Error('Disponibilità per l’ora aggiuntiva non valida.');
     const start = minutes(visit.start), end = minutes(visit.end);
     if (start >= end) throw new Error(`${names.get(visit.personId)}: l'uscita deve essere successiva all'ingresso.`);
     const key = `${visit.day}/${visit.personId}`;
@@ -96,7 +97,7 @@ export function normalizeState(input) {
     if (!Array.isArray(rows) || rows.length > 1000) throw new Error('Elenco delle fasce non valido.');
     return rows.map(v => {
       if (!v || typeof v !== 'object') throw new Error('Fascia non valida.');
-      return { id: v.id, personId: v.personId, day: v.day, start: v.start, end: v.end, site: v.site ?? 'common', note: v.note ?? '', needsReview: v.needsReview ?? false };
+      return { id: v.id, personId: v.personId, day: v.day, start: v.start, end: v.end, site: v.site ?? 'common', canStayExtraHour: v.canStayExtraHour ?? false, note: v.note ?? '', needsReview: v.needsReview ?? false };
     });
   };
   const template = cleanVisits(input.template);
@@ -202,7 +203,76 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
   const autonomous = [...autonomousPeople(visits)];
   visits = visits.filter(v => !autonomous.includes(v.personId));
   for (const v of visits) if (v.needsReview) issues.push(`${byId.get(v.personId).name}: verifica la fascia ${v.start}–${v.end}${v.note ? ` (${v.note})` : ''}.`);
-  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0, autonomous };
+  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0, autonomous, extensions: [], searchLimited: false };
+  const result = planFlexibleDay(visits, people, settings, driveCounts);
+  return { ...result, autonomous };
+}
+
+// All members of a return group can leave at the latest of their scheduled
+// ends. Moving that group earlier to this time cannot cost cars and reduces
+// waiting, so no other minute inside the one-hour windows needs enumeration.
+function planFlexibleDay(visits, people, settings, driveCounts) {
+  const baseline = planFixedDay(visits, people, settings, driveCounts);
+  const departures = new Map();
+  for (const v of visits) departures.set(v.start, (departures.get(v.start) || 0) + 1);
+  const lowerBound = [...departures.values()].reduce((sum, count) => sum + Math.ceil(count / settings.capacity) * 2, 0);
+  const finish = (result, extensions = [], searchLimited = false) => ({ ...result, extensions, searchLimited });
+  if (baseline.ok && baseline.carJourneys === lowerBound) return finish(baseline);
+  // Waiting cannot fix a shortage of outbound seats.
+  if (baseline.issues.some(issue => issue.startsWith('Andata,'))) return finish(baseline);
+  const returnTimes = [...new Set(visits.map(v => v.end))].sort();
+  const flexible = visits.flatMap((v, index) => {
+    if (!v.canStayExtraHour) return [];
+    const next = visits.filter(other => other.personId === v.personId && other.start > v.start).sort((a, b) => a.start.localeCompare(b.start))[0];
+    const latest = Math.min(minutes(v.end) + 60, 1439 - settings.travelMinutes, next ? minutes(next.start) - 2 * settings.travelMinutes : Infinity);
+    const ends = returnTimes.filter(end => end >= v.end && minutes(end) <= latest);
+    return ends.length > 1 ? [{ index, ends }] : [];
+  });
+  if (!flexible.length) return finish(baseline);
+  const rows = visits.map(v => ({ ...v }));
+  const score = (result, waiting) => [result.carJourneys, waiting, result.trips.filter(t => t.direction === 'out').reduce((sum, trip) => sum + trip.cars.reduce((n, car) => n + (driveCounts.get(car.driver) || 0), 0), 0)];
+  const better = (a, b) => a.some((value, i) => value < b[i] && a.slice(0, i).every((v, j) => v === b[j]));
+  let best = baseline.ok ? baseline : null, bestScore = best ? score(best, 0) : [Infinity, Infinity, Infinity], extensions = [], checked = 0, searchLimited = false;
+  function consider(waiting) {
+    // Bound work for unusually large imported schedules. Only complete valid
+    // plans can be returned, and the UI explicitly reports a truncated search.
+    if (checked >= 5000) { searchLimited = true; return; }
+    checked++;
+    const result = planFixedDay(rows, people, settings, driveCounts);
+    if (!result.ok) return;
+    const candidateScore = score(result, waiting);
+    if (!better(candidateScore, bestScore)) return;
+    best = result; bestScore = candidateScore;
+    extensions = rows.flatMap((v, i) => v.end === visits[i].end ? [] : [{ visitId: v.id, personId: v.personId, scheduledEnd: visits[i].end, returnTime: v.end, extraMinutes: minutes(v.end) - minutes(visits[i].end) }]);
+  }
+  // Try shared return times early, before exploring less useful combinations.
+  for (const anchor of returnTimes) {
+    let waiting = 0;
+    for (const { index, ends } of flexible) {
+      rows[index].end = ends.includes(anchor) ? anchor : visits[index].end;
+      waiting += minutes(rows[index].end) - minutes(visits[index].end);
+    }
+    consider(waiting);
+    if (searchLimited) break;
+  }
+  function search(index, waiting) {
+    if (searchLimited || (bestScore[0] === lowerBound && waiting > bestScore[1])) return;
+    if (index === flexible.length) { consider(waiting); return; }
+    const entry = flexible[index];
+    for (const end of entry.ends) {
+      rows[entry.index].end = end;
+      search(index + 1, waiting + minutes(end) - minutes(visits[entry.index].end));
+      if (searchLimited) break;
+    }
+    rows[entry.index].end = visits[entry.index].end;
+  }
+  search(0, 0);
+  if (best) return finish(best, extensions, searchLimited);
+  return finish({ ...baseline, issues: searchLimited ? ['Le combinazioni di orari sono troppe: la ricerca non è completa. Specifica alcune uscite nella settimana e ricalcola.'] : baseline.issues }, [], searchLimited);
+}
+
+function planFixedDay(visits, people, settings, driveCounts) {
+  const byId = new Map(people.map(p => [p.id, p])), issues = [];
   const groups = [], groupIndex = new Map();
   function addGroup(direction, at, visit) {
     const key = `${direction}/${at}`;
@@ -221,9 +291,9 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
     const need = Math.ceil(g.members.length / settings.capacity);
     if (available < need) issues.push(`${g.direction === 'out' ? 'Andata, ingresso' : 'Ritorno, uscita'} ${g.time}: ${g.members.length} persone, ${need} auto necessarie e ${available} disponibili. Colleghi: ${g.members.map(id => byId.get(id).name).join(', ')}.`);
   }
-  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0, autonomous };
+  if (issues.length) return { ok: false, issues, trips: [], carJourneys: 0 };
   const chosen = selectDrivers(groups, candidates, settings.capacity, driveCounts);
-  if (!chosen) return { ok: false, issues: ['Non è possibile coprire tutte le corse con le auto disponibili.'], trips: [], carJourneys: 0, autonomous };
+  if (!chosen) return { ok: false, issues: ['Non è possibile coprire tutte le corse con le auto disponibili.'], trips: [], carJourneys: 0 };
   const trips = groups.map(g => {
     const drivers = g.members.filter((_, i) => chosen.has(g.visits[i]));
     const cars = drivers.map(driver => ({ driver, passengers: [] }));
@@ -234,5 +304,5 @@ export function planDay(visits, people, settings, driveCounts = new Map()) {
     return { ...g, departure: g.direction === 'out' ? time(minutes(g.time) - settings.travelMinutes) : g.time,
       arrival: g.direction === 'out' ? g.time : time(minutes(g.time) + settings.travelMinutes), cars };
   }).sort((a, b) => a.departure.localeCompare(b.departure) || a.direction.localeCompare(b.direction));
-  return { ok: true, issues: [], trips, carJourneys: chosen.size * 2, autonomous };
+  return { ok: true, issues: [], trips, carJourneys: chosen.size * 2 };
 }

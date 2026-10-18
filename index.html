@@ -23,7 +23,7 @@
       <div id="weekDays" class="day-tabs" aria-label="Giorno della settimana"></div>
       <div class="card"><div class="card-heading"><h3 id="weekDayTitle"></h3><button id="addWeekVisit" class="secondary">Aggiungi fascia</button></div><div id="weekVisits"></div></div>
       <div class="section-heading plan-heading"><div><p class="eyebrow">ANDATE E RITORNI</p><h2>Il piano dei viaggi</h2></div><button id="generateButton">Calcola la settimana</button></div>
-      <p class="help">Il piano rispetta gli orari esatti. Ogni conducente porta e riporta la propria auto; i passeggeri possono cambiare auto. Se mancano posti, vedrai le corse da sistemare.</p>
+      <p class="help">Il piano rispetta gli orari previsti. Solo chi indica D può restare fino a un’ora in più, se aiuta a condividere il ritorno. Ogni conducente porta e riporta la propria auto; i passeggeri possono cambiare auto. Se mancano posti, vedrai le corse da sistemare.</p>
       <div id="planOutput"><div class="empty">Prepara gli orari della settimana, poi calcola i viaggi.</div></div>
     </section>
     <section id="templatePanel" aria-labelledby="templateTitle" hidden>
@@ -48,7 +48,9 @@
       <label>Collega<select id="visitPerson" required></select></label>
       <label>Sede<select id="visitSite"><option value="common">Sede della tratta comune</option><option value="falcade">Falcade · spostamenti autonomi</option></select></label>
       <p class="help">Con un impegno a Falcade il collega viaggia autonomamente per quel giorno: non offre né richiede passaggi sulla tratta comune. La disponibilità negli altri giorni resta invariata.</p>
-      <div class="two-columns"><label>Ingresso a scuola<input id="visitStart" type="time" required></label><label>Uscita da scuola<input id="visitEnd" type="time" required></label></div>
+      <div class="two-columns"><label>Ingresso a scuola<input id="visitStart" type="time" required></label><label>Uscita prevista<input id="visitEnd" type="time" required></label></div>
+      <label class="checkbox"><input id="visitExtraHour" type="checkbox"> D · Disponibile a restare fino a un’ora in più</label>
+      <p class="help">L’ora aggiuntiva è facoltativa. Il piano la usa sulla tratta comune solo se serve a organizzare i passaggi e indica l’orario effettivo del ritorno.</p>
       <p class="help">Ogni fascia comprende il viaggio di andata e quello di ritorno. Per risalire nel pomeriggio aggiungi un’altra fascia.</p>
       <label>Nota (facoltativa)<textarea id="visitNote" maxlength="2000" rows="2"></textarea></label>
       <label class="checkbox" id="reviewLabel" hidden><input id="visitReviewed" type="checkbox"> Ho verificato gli orari e le indicazioni da chiarire.</label>

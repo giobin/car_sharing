@@ -70,6 +70,7 @@ function renderVisits(scope, day, rows) {
       const item = node('div', undefined, 'visit'); item.append(node('span', `${v.start} – ${v.end}`, 'visit-time'));
       if (independent.has(person.id)) item.append(node('span', v.site === 'falcade' ? 'Falcade · autonomo' : 'Autonomo per questo giorno', 'badge'));
       else if (visits.length > 1) item.append(node('span', `${index + 1}ª andata e ritorno`, 'badge'));
+      if (v.canStayExtraHour && !independent.has(person.id)) item.append(node('span', 'D · fino a 1 ora in più disponibile', 'badge'));
       if (v.needsReview) item.append(node('span', 'Da verificare', 'badge review'));
       const actions = node('div', undefined, 'visit-actions');
       actions.append(button('Modifica', () => openVisit(scope, v)), button('Rimuovi', () => change(next => {
@@ -122,13 +123,15 @@ function openVisit(scope, visit = null, personId = null) {
   $('visitPerson').replaceChildren(...state.people.map(p => { const option = node('option', p.name); option.value = p.id; return option; }));
   $('visitPerson').value = visit?.personId || personId || state.people[0]?.id || '';
   $('visitSite').value = visit?.site || 'common';
+  $('visitExtraHour').checked = visit?.canStayExtraHour || false;
+  $('visitExtraHour').disabled = $('visitSite').value === 'falcade';
   $('visitStart').value = visit?.start || ''; $('visitEnd').value = visit?.end || ''; $('visitNote').value = visit?.note || '';
   $('visitReviewed').checked = false; $('reviewLabel').hidden = !visit?.needsReview; $('visitError').textContent = ''; $('visitDialog').showModal();
 }
 $('visitForm').onsubmit = event => {
   event.preventDefault();
   const next = structuredClone(state), rows = editing.scope === 'template' ? next.template : (next.weeks[week] ||= []), old = rows.find(v => v.id === editing.id);
-  const visit = { id: editing.id || uid(), personId: $('visitPerson').value, day: editing.day, start: $('visitStart').value, end: $('visitEnd').value, site: $('visitSite').value, note: $('visitNote').value.trim(), needsReview: Boolean(old?.needsReview && !$('visitReviewed').checked) };
+  const visit = { id: editing.id || uid(), personId: $('visitPerson').value, day: editing.day, start: $('visitStart').value, end: $('visitEnd').value, site: $('visitSite').value, canStayExtraHour: $('visitExtraHour').checked, note: $('visitNote').value.trim(), needsReview: Boolean(old?.needsReview && !$('visitReviewed').checked) };
   const proposed = [...rows.filter(v => v.id !== editing.id), visit];
   try {
     const issues = validateVisits(proposed.filter(v => v.personId === visit.personId && v.day === visit.day), next.people, next.settings.travelMinutes);
@@ -137,6 +140,7 @@ $('visitForm').onsubmit = event => {
     commit(next, 'Fascia salvata.'); $('visitDialog').close();
   } catch (error) { $('visitError').textContent = error.message; }
 };
+$('visitSite').onchange = () => { $('visitExtraHour').disabled = $('visitSite').value === 'falcade'; };
 for (const id of ['closeVisit', 'cancelVisit']) $(id).onclick = () => $('visitDialog').close();
 $('cancelConfirm').onclick = () => { confirmAction = null; $('confirmDialog').close(); };
 $('acceptConfirm').onclick = () => { const action = confirmAction; confirmAction = null; $('confirmDialog').close(); try { action?.(); } catch (error) { tell(error.message, true); } };
@@ -166,7 +170,7 @@ $('importFile').onchange = async event => {
     const imported = normalizeState(JSON.parse(await file.text())), pending = imported.template.filter(v => v.needsReview).length;
     confirm('Importa gli orari', `${imported.people.length} colleghi, ${imported.template.length} fasce nell’orario tipo, ${Object.keys(imported.weeks).length} settimane.${pending ? ` ${pending === 1 ? 'Una fascia da verificare' : `${pending} fasce da verificare`} prima di calcolare i viaggi.` : ''} L’importazione sostituisce i dati attuali; puoi annullarla.`, () => {
       persistenceBlocked = false;
-      commit(imported, 'Orari importati. Controlla le fasce da verificare e indica le auto disponibili in “Colleghi e auto”.');
+      commit(imported, `Orari importati. ${pending ? 'Controlla le fasce da verificare e indica' : 'Indica'} le auto disponibili in “Colleghi e auto”.`);
       if (imported.template.length) {
         activeTab = 'template'; templateDay = Math.min(...imported.template.map(v => v.day));
       } else if (Object.keys(imported.weeks).length) {
@@ -194,6 +198,8 @@ $('generateButton').onclick = () => {
     if (!result.trips.length && result.ok && !result.autonomous.length) continue;
     const section = node('section', undefined, 'plan-day'); section.append(node('h3', `${name} ${formatDate(addDays(week, day))}`));
     if (result.autonomous.length) section.append(node('p', `Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio assegnato sulla tratta comune.`, 'help'));
+    for (const extension of result.extensions) section.append(node('p', extensionText(extension), 'notice'));
+    if (result.searchLimited && result.ok) section.append(node('p', 'Il piano copre tutti i viaggi, ma le combinazioni di orari sono molte: la ricerca è stata limitata e potrebbe esserci una soluzione migliore.', 'warning'));
     if (!result.ok) {
       const warning = node('div', undefined, 'warning'); warning.append(node('strong', 'Nessun piano completo per questo giorno.'));
       const list = node('ul'); result.issues.forEach(issue => list.append(node('li', issue))); warning.append(list); section.append(warning);
@@ -208,15 +214,20 @@ $('generateButton').onclick = () => {
     }
     output.append(section);
   }
-  tell(failed ? 'Piano calcolato: controlla i giorni segnalati.' : 'Piano calcolato con il minimo numero di viaggi in auto per questi orari.');
+  tell(failed || lastPlan.some(p => p.result.searchLimited) ? 'Piano calcolato: controlla i giorni segnalati.' : 'Piano calcolato con il minimo numero di viaggi in auto, usando la disponibilità D solo quando utile.');
 };
+function extensionText(extension) {
+  return `${state.people.find(p => p.id === extension.personId).name}: uscita prevista ${extension.scheduledEnd}, ritorno alle ${extension.returnTime} (+${extension.extraMinutes} min, disponibilità D).`;
+}
 function planText() {
-  const lines = [`VIAGGI A SCUOLA · settimana del ${formatDate(week)}`, `Tratta: ${state.settings.travelMinutes} minuti. Posti per auto: ${state.settings.capacity}, conducente incluso.`, 'Orari esatti; ogni conducente porta e riporta la propria auto.', ''];
+  const lines = [`VIAGGI A SCUOLA · settimana del ${formatDate(week)}`, `Tratta: ${state.settings.travelMinutes} minuti. Posti per auto: ${state.settings.capacity}, conducente incluso.`, 'Orari previsti rispettati; solo chi indica D può restare fino a un’ora in più. Ogni conducente porta e riporta la propria auto.', ''];
   if (state.importNotes.length) lines.push('Note degli orari importati:', ...state.importNotes, '');
   for (const { name, day, result } of lastPlan || []) {
     if (!result.trips.length && result.ok && !result.autonomous.length) continue;
     lines.push(`${name} ${formatDate(addDays(week, day))}`);
     if (result.autonomous.length) lines.push(`Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio sulla tratta comune.`);
+    lines.push(...result.extensions.map(extensionText));
+    if (result.searchLimited && result.ok) lines.push('Ricerca limitata: piano completo, ma potrebbe esserci una soluzione migliore.');
     if (!result.ok) lines.push('DA SISTEMARE: nessun piano completo.', ...result.issues);
     for (const trip of result.trips) {
       lines.push(`${trip.departure} ${trip.direction === 'out' ? 'Andata' : 'Ritorno'} (arrivo ${trip.arrival})`);
