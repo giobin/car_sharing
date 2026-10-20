@@ -4,11 +4,15 @@ Planner statico per colleghi che condividono un unico punto di ritrovo e una sed
 
 ## Utilizzo
 
-1. In **Colleghi e auto**, aggiungere i colleghi e indicare chi mette a disposizione un'auto. Impostare durata della tratta e posti, conducente incluso.
+1. In **Colleghi e auto**, aggiungere i colleghi e selezionare chi **può mettere l'auto**. È l'elenco dei possibili conducenti: il programma sceglierà chi guida davvero. Se tutti possono guidare, il pulsante **Tutti possono mettere l'auto** li seleziona con un clic; si possono poi togliere le singole eccezioni. Impostare durata della tratta e posti, conducente incluso.
 2. In **Orario tipo**, salvare le presenze abituali dal lunedì alla domenica, oppure usare **Importa orari** con un backup JSON.
 3. Scegliere una settimana e premere **Precompila dall'orario tipo**. Le modifiche alla settimana non cambiano il modello né le altre settimane.
 4. Ogni fascia comprende un ingresso e un'uscita dalla sede. Per un rientro intermedio aggiungere una seconda fascia allo stesso collega e giorno. Un'ora buca trascorsa in sede resta nella stessa fascia.
 5. Premere **Calcola la settimana**. I giorni senza abbastanza auto o con fasce da verificare vengono segnalati e non producono assegnazioni parziali spacciate per complete.
+
+Se nessuna auto è selezionata, il calcolo accompagna direttamente alla scelta dei possibili conducenti, senza mostrare pagine di corse con zero auto. Anche un'importazione senza disponibilità guida a questo passaggio. Da lì si può precompilare e calcolare una settimana nuova oppure ricalcolare quella già preparata, mantenendone le modifiche. Una settimana preparata ma vuota resta vuota.
+
+Ogni giorno organizzato mostra **Chi mette l'auto**, con andata e ritorno per ogni fascia, seguito dalle corse con **Autista** e **Passeggeri** espliciti. Il riepilogo è incluso anche nel piano scaricato. Le disponibilità già salvate non cambiano con l'aggiornamento dell'app; il pulsante per selezionare tutti agisce solo su richiesta dell'utente.
 
 La sede **Falcade** (sigla F nell'orario) indica uno spostamento autonomo. Per impostazione, chi ha un impegno a Falcade non offre né richiede passaggi sulla tratta comune per quel giorno, anche se ha altre fasce nella sede comune. Il programma lo mostra esplicitamente tra gli autonomi; la disponibilità auto degli altri giorni resta invariata. Gli spostamenti autonomi non rientrano nel conteggio dei viaggi condivisi e non usano la durata della tratta comune. La sede si può modificare nell'orario tipo o nella singola settimana.
 
