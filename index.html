@@ -20,6 +20,7 @@
     <section id="weekPanel" aria-labelledby="weekTitle">
       <div class="section-heading"><div><p class="eyebrow">IL PROGRAMMA DA ORGANIZZARE</p><h2 id="weekTitle">La settimana</h2></div><label>Settimana del<input id="weekDate" type="date" required></label></div>
       <div class="action-strip"><p id="weekSummary"></p><button id="applyButton">Precompila dall’orario tipo</button></div>
+      <div id="carSetupPrompt" class="warning" hidden><strong>Prima del calcolo, indica chi può mettere l’auto</strong><p>Non risulta selezionata nessuna auto. Seleziona i colleghi che possono guidare: sarà il piano a scegliere chi usa davvero la propria macchina.</p><button id="setupCarsButton" class="secondary">Scegli le auto disponibili</button></div>
       <div id="weekDays" class="day-tabs" aria-label="Giorno della settimana"></div>
       <div class="card"><div class="card-heading"><h3 id="weekDayTitle"></h3><button id="addWeekVisit" class="secondary">Aggiungi fascia</button></div><div id="weekVisits"></div></div>
       <div class="section-heading plan-heading"><div><p class="eyebrow">ANDATE E RITORNI</p><h2>Il piano dei viaggi</h2></div><button id="generateButton">Calcola la settimana</button></div>
@@ -34,8 +35,9 @@
       <p class="help">Una fascia indica un’andata e un ritorno. Chi rientra al ritrovo e risale nel pomeriggio avrà due fasce nello stesso giorno. Un’ora buca a scuola resta nella stessa fascia.</p>
     </section>
     <section id="peoplePanel" aria-labelledby="peopleTitle" hidden>
-      <div class="section-heading"><div><p class="eyebrow">IL GRUPPO</p><h2 id="peopleTitle">Colleghi e auto</h2><p>Indica chi può guidare e mettere a disposizione la propria auto.</p></div></div>
-      <form id="personForm" class="card inline-form"><label>Nome del collega<input id="personName" maxlength="100" required autocomplete="off"></label><label class="checkbox"><input id="personCar" type="checkbox"> Auto disponibile</label><button>Aggiungi collega</button></form>
+      <div class="section-heading"><div><p class="eyebrow">IL GRUPPO</p><h2 id="peopleTitle" tabindex="-1">Chi può mettere l’auto?</h2><p>Seleziona tutti i colleghi che possono guidare con la propria auto. Non stai assegnando i conducenti: il piano sceglierà chi mette la macchina, tenendo conto dei turni già assegnati nella settimana.</p></div></div>
+      <div class="card car-setup"><p id="carAvailabilitySummary" role="status"></p><div class="setup-actions"><button id="allCarsButton" class="secondary">Tutti possono mettere l’auto</button><button id="calculateWithCarsButton">Calcola con queste disponibilità</button></div><p class="help">Se qualcuno non può guidare, lascia la sua casella vuota. Chi lavora a Falcade resta autonomo nei giorni previsti.</p></div>
+      <form id="personForm" class="card inline-form"><label>Nome del collega<input id="personName" maxlength="100" required autocomplete="off"></label><label class="checkbox"><input id="personCar" type="checkbox"> Può mettere l’auto</label><button>Aggiungi collega</button></form>
       <div id="peopleList" class="people-grid"></div>
       <form id="settingsForm" class="card"><h3>La tratta comune</h3><div class="inline-form"><label>Durata di un viaggio (minuti)<input id="travelMinutes" type="number" min="1" max="240" required></label><label>Posti per auto, conducente incluso<input id="capacity" type="number" min="1" max="9" required></label><button>Salva impostazioni</button></div><p class="help">La durata serve a calcolare la partenza dal ritrovo e a verificare che ci sia tempo per un rientro intermedio. I posti sono uguali per tutte le auto.</p></form>
     </section>

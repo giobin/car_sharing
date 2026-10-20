@@ -45,6 +45,12 @@ function confirm(title, text, action, label = 'Conferma') {
 }
 function formatDate(date) { return new Intl.DateTimeFormat('it-IT', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`)); }
 const weekRows = () => state.weeks[week] || [];
+function needsCarSetup(rows) {
+  return !state.people.some(p => p.hasCar) && rows.some(v => v.site !== 'falcade' && !rows.some(other => other.day === v.day && other.personId === v.personId && other.site === 'falcade'));
+}
+function showCarSetup() {
+  activeTab = 'people'; render(); $('peopleTitle').focus();
+}
 
 function renderDays(scope, day, rows) {
   const container = $(`${scope}Days`); container.replaceChildren();
@@ -95,12 +101,18 @@ function renderPeople() {
       if (uses) confirm('Rimuovere il collega?', `Verranno rimosse anche le ${uses} fasce di ${person.name} nell’orario tipo e nelle settimane preparate. Puoi annullare l’operazione.`, remove, 'Rimuovi collega'); else remove();
     }, 'text-button danger'));
     const label = node('label', undefined, 'checkbox'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = person.hasCar;
-    checkbox.setAttribute('aria-label', `Auto disponibile: ${person.name}`);
+    checkbox.setAttribute('aria-label', `Può mettere l’auto: ${person.name}`);
     checkbox.onchange = () => change(next => { next.people.find(p => p.id === person.id).hasCar = checkbox.checked; }, 'Disponibilità auto aggiornata. Ricalcola il piano.');
-    label.append(checkbox, document.createTextNode('Auto disponibile')); card.append(heading, label); $('peopleList').append(card);
+    label.append(checkbox, document.createTextNode('Può mettere l’auto')); card.append(heading, label); $('peopleList').append(card);
   }
   if (!state.people.length) $('peopleList').append(node('div', 'Aggiungi i colleghi del gruppo.', 'empty'));
   $('capacity').value = state.settings.capacity; $('travelMinutes').value = state.settings.travelMinutes;
+  const count = state.people.filter(p => p.hasCar).length;
+  $('carAvailabilitySummary').textContent = count ? `${count} ${count === 1 ? 'collega può' : 'colleghi possono'} mettere l’auto. Il piano sceglie i conducenti necessari per ogni giorno.` : 'Nessuna auto selezionata. Indica chi può metterla per permettere al piano di assegnare i conducenti.';
+  $('allCarsButton').disabled = !state.people.length || count === state.people.length;
+  const prepared = Object.hasOwn(state.weeks, week), rows = prepared ? weekRows() : state.template;
+  $('calculateWithCarsButton').disabled = !rows.length || needsCarSetup(rows);
+  $('calculateWithCarsButton').textContent = prepared ? 'Calcola con queste disponibilità' : 'Precompila e calcola la settimana';
 }
 function render() {
   for (const tab of ['week', 'template', 'people']) $(`${tab}Panel`).hidden = tab !== activeTab;
@@ -111,6 +123,7 @@ function render() {
   const prepared = Object.hasOwn(state.weeks, week);
   $('weekSummary').textContent = prepared ? `${weekRows().length} fasce in questa settimana. Puoi modificarle senza cambiare l’orario tipo.` : 'La settimana è ancora da preparare. Gli orari abituali si copiano con un clic.';
   $('applyButton').textContent = prepared ? 'Ripristina dall’orario tipo' : 'Precompila dall’orario tipo'; $('applyButton').disabled = !state.template.length;
+  $('carSetupPrompt').hidden = !needsCarSetup(prepared ? weekRows() : state.template);
   renderDays('week', selectedDay, weekRows()); renderDays('template', templateDay, state.template);
   renderVisits('week', selectedDay, weekRows()); renderVisits('template', templateDay, state.template); renderPeople();
   $('addWeekVisit').disabled = $('addTemplateVisit').disabled = !state.people.length;
@@ -156,6 +169,12 @@ $('personForm').onsubmit = event => {
   const count = state.people.length; change(next => { next.people.push({ id: uid(), name, hasCar: $('personCar').checked }); }, `${name} aggiunto al gruppo.`);
   if (state.people.length > count) { $('personName').value = ''; $('personCar').checked = false; }
 };
+$('setupCarsButton').onclick = showCarSetup;
+$('allCarsButton').onclick = () => change(next => { next.people.forEach(p => { p.hasCar = true; }); }, 'Tutti possono mettere l’auto. Deseleziona eventuali colleghi che non possono guidare; il piano sceglierà i conducenti.');
+$('calculateWithCarsButton').onclick = () => {
+  if (!Object.hasOwn(state.weeks, week)) commit(applyTemplate(state, week, uid), 'Settimana precompilata dall’orario tipo.');
+  activeTab = 'week'; render(); $('generateButton').click(); $('planOutput').scrollIntoView({ behavior:'smooth', block:'start' });
+};
 $('settingsForm').onsubmit = event => { event.preventDefault(); change(next => { next.settings = { capacity: Number($('capacity').value), travelMinutes: Number($('travelMinutes').value) }; }, 'Impostazioni salvate. Ricalcola il piano.'); };
 $('undoButton').onclick = () => { if (!undo.length) return; state = undo.pop(); lastPlan = null; persist(); render(); tell('Ultima modifica annullata.'); };
 function download(filename, contents, type) {
@@ -177,6 +196,7 @@ $('importFile').onchange = async event => {
         activeTab = 'week'; week = Object.keys(imported.weeks).sort()[0];
         selectedDay = imported.weeks[week].length ? Math.min(...imported.weeks[week].map(v => v.day)) : 0;
       } else activeTab = 'people';
+      if (needsCarSetup(imported.template) || Object.values(imported.weeks).some(needsCarSetup)) activeTab = 'people';
       render();
     }, 'Importa');
   } catch (error) { tell(error instanceof SyntaxError ? 'Il file non contiene un JSON valido.' : error.message, true); }
@@ -184,6 +204,11 @@ $('importFile').onchange = async event => {
 };
 $('generateButton').onclick = () => {
   if (!weekRows().length) { tell('Aggiungi almeno una fascia alla settimana.', true); return; }
+  if (needsCarSetup(weekRows())) {
+    lastPlan = null; showCarSetup();
+    tell('Per scegliere chi mette la macchina, prima indica chi può farlo. Puoi selezionare tutti e togliere chi non ha un’auto disponibile.', true);
+    return;
+  }
   const driveCounts = new Map();
   lastPlan = DAYS.map((name, day) => {
     const result = planDay(weekRows().filter(v => v.day === day), state.people, state.settings, driveCounts);
@@ -200,15 +225,21 @@ $('generateButton').onclick = () => {
     if (result.autonomous.length) section.append(node('p', `Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio assegnato sulla tratta comune.`, 'help'));
     for (const extension of result.extensions) section.append(node('p', extensionText(extension), 'notice'));
     if (result.searchLimited && result.ok) section.append(node('p', 'Il piano copre tutti i viaggi, ma le combinazioni di orari sono molte: la ricerca è stata limitata e potrebbe esserci una soluzione migliore.', 'warning'));
+    if (result.ok && result.trips.length) {
+      const driverSummary = node('div', undefined, 'driver-summary'); driverSummary.append(node('h4', 'Chi mette l’auto'));
+      for (const assignment of driverAssignments(result)) driverSummary.append(node('p', assignmentText(assignment)));
+      section.append(driverSummary);
+    }
     if (!result.ok) {
       const warning = node('div', undefined, 'warning'); warning.append(node('strong', 'Nessun piano completo per questo giorno.'));
+      warning.append(button('Controlla chi può mettere l’auto', showCarSetup, 'secondary'));
       const list = node('ul'); result.issues.forEach(issue => list.append(node('li', issue))); warning.append(list); section.append(warning);
     } else for (const trip of result.trips) {
       const row = node('div', undefined, 'trip'), timing = node('div'), cars = node('div');
       timing.append(node('div', trip.departure, 'trip-time'), node('div', trip.direction === 'out' ? `ANDATA · a scuola alle ${trip.arrival}` : `RITORNO · al ritrovo alle ${trip.arrival}`, 'trip-kind'));
       for (const car of trip.cars) {
         const names = ids => ids.map(id => state.people.find(p => p.id === id).name).join(', '), line = node('div', undefined, 'car-row');
-        line.append(node('strong', names([car.driver])), node('span', ` guida · ${car.passengers.length ? `con ${names(car.passengers)}` : 'nessun passeggero'}`)); cars.append(line);
+        line.append(node('strong', `Autista: ${names([car.driver])}`), node('span', ` · Passeggeri: ${car.passengers.length ? names(car.passengers) : 'nessuno'}`)); cars.append(line);
       }
       row.append(timing, cars); section.append(row);
     }
@@ -216,6 +247,16 @@ $('generateButton').onclick = () => {
   }
   tell(failed || lastPlan.some(p => p.result.searchLimited) ? 'Piano calcolato: controlla i giorni segnalati.' : 'Piano calcolato con il minimo numero di viaggi in auto, usando la disponibilità D solo quando utile.');
 };
+function driverAssignments(result) {
+  return result.trips.filter(trip => trip.direction === 'out').flatMap(trip => trip.cars.map(car => {
+    const visitId = trip.visits[trip.members.indexOf(car.driver)];
+    const back = result.trips.find(candidate => candidate.direction === 'back' && candidate.visits.includes(visitId));
+    return { personId: car.driver, departure: trip.departure, returnTime: back.departure };
+  }));
+}
+function assignmentText(assignment) {
+  return `${state.people.find(p => p.id === assignment.personId).name} · andata dal ritrovo alle ${assignment.departure}, ritorno dalla sede alle ${assignment.returnTime}.`;
+}
 function extensionText(extension) {
   return `${state.people.find(p => p.id === extension.personId).name}: uscita prevista ${extension.scheduledEnd}, ritorno alle ${extension.returnTime} (+${extension.extraMinutes} min, disponibilità D).`;
 }
@@ -228,6 +269,7 @@ function planText() {
     if (result.autonomous.length) lines.push(`Falcade · spostamenti autonomi: ${result.autonomous.map(id => state.people.find(p => p.id === id).name).join(', ')}. Nessun passaggio sulla tratta comune.`);
     lines.push(...result.extensions.map(extensionText));
     if (result.searchLimited && result.ok) lines.push('Ricerca limitata: piano completo, ma potrebbe esserci una soluzione migliore.');
+    if (result.ok && result.trips.length) lines.push('CHI METTE L’AUTO', ...driverAssignments(result).map(assignmentText));
     if (!result.ok) lines.push('DA SISTEMARE: nessun piano completo.', ...result.issues);
     for (const trip of result.trips) {
       lines.push(`${trip.departure} ${trip.direction === 'out' ? 'Andata' : 'Ritorno'} (arrivo ${trip.arrival})`);
